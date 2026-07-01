@@ -11,8 +11,18 @@ public enum SeratoProcessGuard {
     /// their exact identifiers.
     private static let bundleIdentifierPrefix = "com.serato."
 
+    /// Test-only override so callers can simulate "Serato is running"
+    /// without needing the real app installed/launched.
+    ///
+    /// `nonisolated(unsafe)`: intentionally mutable, matching the override
+    /// pattern already used by `SeratoBackupBeforeWrite`.
+    public nonisolated(unsafe) static var isRunningOverride: Bool?
+
     public static var isSeratoRunning: Bool {
-        NSWorkspace.shared.runningApplications.contains { app in
+        if let override = isRunningOverride {
+            return override
+        }
+        return NSWorkspace.shared.runningApplications.contains { app in
             app.bundleIdentifier?.hasPrefix(bundleIdentifierPrefix) ?? false
         }
     }

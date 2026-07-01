@@ -4,7 +4,7 @@ import PackageDescription
 let package = Package(
     name: "SeratoTools",
     platforms: [
-        .macOS(.v13)
+        .macOS(.v14)
     ],
     products: [
         .executable(name: "SeratoTools", targets: ["SeratoToolsApp"]),
