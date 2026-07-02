@@ -43,6 +43,9 @@ struct CrateDetailView: View {
                             pendingDeleteTracks = selected
                             pendingDeleteCrate = crate
                             showTrackDeleteDialog = true
+                        },
+                        onMetadataEditRequested: { track, metadata in
+                            applyTrackMetadataEdit(track: track, metadata: metadata)
                         }
                     )
 
@@ -181,6 +184,19 @@ struct CrateDetailView: View {
                 let rewrittenPaths = crate.trackPaths.filter { !paths.contains($0) }
                 _ = try SeratoCrateEditor.rewriteTrackPaths(in: crate, to: rewrittenPaths)
             }
+        }
+    }
+
+    private func applyTrackMetadataEdit(track: Track, metadata: SeratoTrackMetadataUpdate) {
+        do {
+            try SeratoTrackMetadataEditor.update(
+                track: track,
+                metadata: metadata,
+                databaseFileURL: libraryService.databaseFile
+            )
+            onCratesChanged()
+        } catch {
+            trackEditErrorMessage = error.localizedDescription
         }
     }
 

@@ -17,6 +17,8 @@ struct TrackTableView: View {
         case artist
         case album
         case genre
+        case year
+        case comment
         case color
         case key
         case bpm
@@ -26,6 +28,7 @@ struct TrackTableView: View {
     let tracks: [Track]
     let numberingMode: NumberingMode
     let onDeleteRequested: (([Track]) -> Void)?
+    let onMetadataEditRequested: ((Track, SeratoTrackMetadataUpdate) -> Void)?
 
     @State private var searchText = ""
     @State private var selectedTrackIDs: Set<Track.ID> = []
@@ -38,11 +41,13 @@ struct TrackTableView: View {
     init(
         tracks: [Track],
         numberingMode: NumberingMode = .metadata,
-        onDeleteRequested: (([Track]) -> Void)? = nil
+        onDeleteRequested: (([Track]) -> Void)? = nil,
+        onMetadataEditRequested: ((Track, SeratoTrackMetadataUpdate) -> Void)? = nil
     ) {
         self.tracks = tracks
         self.numberingMode = numberingMode
         self.onDeleteRequested = onDeleteRequested
+        self.onMetadataEditRequested = onMetadataEditRequested
     }
 
     var body: some View {
@@ -67,7 +72,8 @@ struct TrackTableView: View {
                 sortAscending: $sortAscending,
                 dragPayloadForRow: { rowIndex, selectedIDs in
                     dragPayload(for: rowIndex, selectedIDs: selectedIDs)
-                }
+                },
+                onMetadataEditRequested: onMetadataEditRequested
             )
         }
         .onAppear {
@@ -190,7 +196,7 @@ struct TrackTableView: View {
                 || track.album.lowercased().contains(queryLower)
         }
 
-        return filtered.sorted { lhs, rhs in
+        return filtered.sorted { (lhs: Track, rhs: Track) in
             let ordered: Bool
             switch sortColumn {
             case .number:
@@ -203,6 +209,10 @@ struct TrackTableView: View {
                 ordered = lhs.album.localizedCaseInsensitiveCompare(rhs.album) == .orderedAscending
             case .genre:
                 ordered = lhs.genre.localizedCaseInsensitiveCompare(rhs.genre) == .orderedAscending
+            case .year:
+                ordered = lhs.yearSortValue < rhs.yearSortValue
+            case .comment:
+                ordered = lhs.comment.localizedCaseInsensitiveCompare(rhs.comment) == .orderedAscending
             case .color:
                 ordered = lhs.colorSortValue < rhs.colorSortValue
             case .key:
@@ -251,6 +261,7 @@ private struct TrackNSTableView: NSViewRepresentable {
     @Binding var sortColumn: String
     @Binding var sortAscending: Bool
     let dragPayloadForRow: (_ rowIndex: Int, _ selectedIDs: Set<Track.ID>) -> String
+    let onMetadataEditRequested: ((Track, SeratoTrackMetadataUpdate) -> Void)?
 
     func makeCoordinator() -> Coordinator {
         Coordinator(parent: self)
@@ -264,6 +275,8 @@ private struct TrackNSTableView: NSViewRepresentable {
         table.intercellSpacing = NSSize(width: 6, height: 4)
         table.delegate = context.coordinator
         table.dataSource = context.coordinator
+        table.target = context.coordinator
+        table.doubleAction = #selector(Coordinator.handleDoubleClick(_:))
         table.registerForDraggedTypes([.string])
         table.setDraggingSourceOperationMask(.copy, forLocal: false)
 
@@ -307,6 +320,8 @@ private struct TrackNSTableView: NSViewRepresentable {
             ColumnDescriptor(id: "artist", title: "Artist", width: 190),
             ColumnDescriptor(id: "album", title: "Album", width: 190),
             ColumnDescriptor(id: "genre", title: "Genre", width: 150),
+            ColumnDescriptor(id: "year", title: "Year", width: 70),
+            ColumnDescriptor(id: "comment", title: "Comment", width: 240),
             ColumnDescriptor(id: "color", title: "Color", width: 90),
             ColumnDescriptor(id: "key", title: "Key", width: 70),
             ColumnDescriptor(id: "bpm", title: "BPM", width: 70),
@@ -315,10 +330,11 @@ private struct TrackNSTableView: NSViewRepresentable {
     }
 
     @MainActor
-    final class Coordinator: NSObject, NSTableViewDataSource, NSTableViewDelegate {
+    final class Coordinator: NSObject, NSTableViewDataSource, NSTableViewDelegate, NSTextFieldDelegate {
         var parent: TrackNSTableView
         weak var tableView: NSTableView?
         private var applyingSortDescriptor = false
+        private let editableColumnIDs: Set<String> = ["title", "artist", "album", "genre", "year", "comment", "key", "bpm"]
 
         init(parent: TrackNSTableView) {
             self.parent = parent
@@ -331,19 +347,30 @@ private struct TrackNSTableView: NSViewRepresentable {
         func tableView(_ tableView: NSTableView, viewFor tableColumn: NSTableColumn?, row: Int) -> NSView? {
             guard row >= 0, row < parent.tracks.count, let tableColumn else { return nil }
             let track = parent.tracks[row]
-            let identifier = NSUserInterfaceItemIdentifier("Cell_\(tableColumn.identifier.rawValue)")
+            let columnID = tableColumn.identifier.rawValue
+            let identifier = NSUserInterfaceItemIdentifier("Cell_\(columnID)")
+            let allowsInlineEdit = editableColumnIDs.contains(columnID)
 
             let cell: NSTableCellView
             if let reused = tableView.makeView(withIdentifier: identifier, owner: nil) as? NSTableCellView,
-               let textField = reused.textField {
+               let textField = reused.textField as? EditableTextField {
                 cell = reused
-                textField.stringValue = Self.stringValue(for: track, columnID: tableColumn.identifier.rawValue)
+                textField.stringValue = Self.stringValue(for: track, columnID: columnID)
+                textField.rowIndex = row
+                textField.columnID = columnID
+                textField.isEditable = false
+                textField.isSelectable = allowsInlineEdit
             } else {
                 let newCell = NSTableCellView(frame: .zero)
                 newCell.identifier = identifier
-                let textField = NSTextField(labelWithString: Self.stringValue(for: track, columnID: tableColumn.identifier.rawValue))
+                let textField = EditableTextField(labelWithString: Self.stringValue(for: track, columnID: columnID))
                 textField.translatesAutoresizingMaskIntoConstraints = false
                 textField.lineBreakMode = .byTruncatingTail
+                textField.rowIndex = row
+                textField.columnID = columnID
+                textField.isEditable = false
+                textField.isSelectable = allowsInlineEdit
+                textField.delegate = self
                 newCell.addSubview(textField)
                 newCell.textField = textField
                 NSLayoutConstraint.activate([
@@ -378,6 +405,68 @@ private struct TrackNSTableView: NSViewRepresentable {
                 return nil
             }
             return NSString(string: payload)
+        }
+
+        @objc func handleDoubleClick(_ sender: Any?) {
+            guard let table = tableView else { return }
+            let row = table.clickedRow
+            let column = table.clickedColumn
+            guard row >= 0, row < parent.tracks.count, column >= 0 else { return }
+
+            let columnID = table.tableColumns[column].identifier.rawValue
+            guard editableColumnIDs.contains(columnID) else { return }
+
+            guard let cell = table.view(atColumn: column, row: row, makeIfNecessary: false) as? NSTableCellView,
+                  let textField = cell.textField as? EditableTextField else { return }
+
+            textField.isEditable = true
+            table.window?.makeFirstResponder(textField)
+            textField.currentEditor()?.selectAll(nil)
+        }
+
+        func controlTextDidEndEditing(_ obj: Notification) {
+            guard let textField = obj.object as? EditableTextField else { return }
+            defer { textField.isEditable = false }
+
+            let row = textField.rowIndex
+            guard row >= 0, row < parent.tracks.count else { return }
+
+            let track = parent.tracks[row]
+            let edited = textField.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
+
+            var metadata = SeratoTrackMetadataUpdate(
+                title: track.title,
+                artist: track.artist,
+                album: track.album,
+                genre: track.genre,
+                comment: track.comment,
+                key: track.key ?? "",
+                bpm: track.bpm,
+                year: track.year
+            )
+
+            switch textField.columnID {
+            case "title":
+                metadata.title = edited
+            case "artist":
+                metadata.artist = edited
+            case "album":
+                metadata.album = edited
+            case "genre":
+                metadata.genre = edited
+            case "year":
+                metadata.year = Int(edited)
+            case "comment":
+                metadata.comment = edited
+            case "key":
+                metadata.key = edited
+            case "bpm":
+                metadata.bpm = Double(edited)
+            default:
+                return
+            }
+
+            parent.onMetadataEditRequested?(track, metadata)
         }
 
         func restoreSelectionIfNeeded() {
@@ -415,6 +504,10 @@ private struct TrackNSTableView: NSViewRepresentable {
                 return track.album
             case "genre":
                 return track.genre
+            case "year":
+                return track.year.map(String.init) ?? "—"
+            case "comment":
+                return track.comment
             case "color":
                 return track.colorLabel
             case "key":
@@ -430,6 +523,11 @@ private struct TrackNSTableView: NSViewRepresentable {
     }
 }
 
+private final class EditableTextField: NSTextField {
+    var rowIndex: Int = -1
+    var columnID: String = ""
+}
+
 private extension Track {
     var numberSortValue: Int {
         trackNumber ?? Int.max
@@ -441,6 +539,10 @@ private extension Track {
 
     var bpmSortValue: Double {
         bpm ?? -1
+    }
+
+    var yearSortValue: Int {
+        year ?? Int.min
     }
 
     var durationSortValue: TimeInterval {
