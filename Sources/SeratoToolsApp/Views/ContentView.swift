@@ -5,6 +5,7 @@ import SeratoToolsCore
 enum SidebarSection: Hashable {
     case tracks
     case crates
+    case tags
     case missingTracks
 }
 
@@ -46,6 +47,7 @@ struct ContentView: View {
     @State private var selectedTrackGenreFilter: String?
     @State private var quickTrackDeleteAction: QuickTrackDeleteAction?
     @State private var showQuickTrackDeleteConfirmation = false
+    @State private var showDiscogsTokenSheet = false
     @AppStorage(Self.confirmDeleteActionsDefaultsKey) private var confirmDeleteActions = true
 
     private var totalCratesCount: Int {
@@ -106,7 +108,7 @@ struct ContentView: View {
 
                             Group {
                                 if let node = selectedCrateNode {
-                                    CrateDetailView(node: node, onCratesChanged: reloadLibrary)
+                                    CrateDetailView(node: node, filterMode: crateListFilterMode, onCratesChanged: reloadLibrary)
                                 } else {
                                     Text("Select an item")
                                         .foregroundStyle(.secondary)
@@ -143,6 +145,9 @@ struct ContentView: View {
             TrackMetadataEditorSheet(track: track) { metadata in
                 try saveTrackMetadataEdit(track: track, metadata: metadata)
             }
+        }
+        .sheet(isPresented: $showDiscogsTokenSheet) {
+            DiscogsTokenSettingsSheet()
         }
         .confirmationDialog(
             "Delete Selected Tracks",
@@ -288,6 +293,7 @@ struct ContentView: View {
         List(selection: $selectedSection) {
             Label("Tracks", systemImage: "music.note.list").tag(SidebarSection.tracks)
             Label("Crates", systemImage: "square.stack").tag(SidebarSection.crates)
+            Label("Tags", systemImage: "tag").tag(SidebarSection.tags)
             Label("Missing Tracks", systemImage: "exclamationmark.triangle").tag(SidebarSection.missingTracks)
         }
         .frame(minWidth: sidebarWidth, idealWidth: sidebarWidth, maxWidth: sidebarWidth)
@@ -307,6 +313,7 @@ struct ContentView: View {
                     Button("Browse…") { chooseLibraryDirectory() }
                     Button("Apply") { applyLibraryDirectory() }
                     Button("Reload") { reloadLibrary() }
+                    Button("API Keys…") { showDiscogsTokenSheet = true }
                 }
                 .padding(.horizontal, 8)
                 .padding(.top, 8)
@@ -426,6 +433,10 @@ struct ContentView: View {
                     }
                 )
             }
+        case .tags:
+            TagsBulkEditView(onApplyMetadata: { track, metadata in
+                try saveTrackMetadataEdit(track: track, metadata: metadata)
+            })
         case .missingTracks:
             MissingTracksView()
         case .crates:
@@ -572,5 +583,62 @@ struct ContentView: View {
             databaseFileURL: libraryService.databaseFile
         )
         reloadLibrary()
+    }
+}
+
+private struct DiscogsTokenSettingsSheet: View {
+    @Environment(\.dismiss) private var dismiss
+
+    @State private var tokenInput = ""
+    @State private var statusMessage: String?
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text("API Keys")
+                .font(.headline)
+
+            Text("Discogs Token")
+                .font(.subheadline.weight(.semibold))
+
+            SecureField("Paste Discogs token", text: $tokenInput)
+                .textFieldStyle(.roundedBorder)
+
+            Text("Used for Discogs metadata lookup. Stored in UserDefaults as SeratoToolsDiscogsToken.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+
+            if let statusMessage {
+                Text(statusMessage)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+
+            HStack {
+                Button("Clear") {
+                    UserDefaults.standard.removeObject(forKey: OnlineTrackMetadataLookupService.discogsTokenDefaultsKey)
+                    tokenInput = ""
+                    statusMessage = "Discogs token cleared."
+                }
+
+                Spacer()
+
+                Button("Close") {
+                    dismiss()
+                }
+
+                Button("Save") {
+                    let trimmed = tokenInput.trimmingCharacters(in: .whitespacesAndNewlines)
+                    UserDefaults.standard.set(trimmed, forKey: OnlineTrackMetadataLookupService.discogsTokenDefaultsKey)
+                    statusMessage = "Discogs token saved."
+                }
+                .disabled(tokenInput.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                .keyboardShortcut(.defaultAction)
+            }
+        }
+        .padding(16)
+        .frame(width: 500)
+        .onAppear {
+            tokenInput = UserDefaults.standard.string(forKey: OnlineTrackMetadataLookupService.discogsTokenDefaultsKey) ?? ""
+        }
     }
 }

@@ -22,6 +22,7 @@ struct CrateDetailView: View {
     private static let confirmDeleteActionsDefaultsKey = "SeratoToolsConfirmTrackDeleteActions"
 
     let node: CrateNode
+    let filterMode: CrateListFilterMode
     let onCratesChanged: () -> Void
     @EnvironmentObject private var libraryService: LibraryService
 
@@ -407,7 +408,15 @@ struct CrateDetailView: View {
         }
 
         let pathPrefix = node.pathComponents
-        let descendantCrates = (libraryService.crates + libraryService.smartCrates)
+        let sourceCrates: [Crate]
+        switch filterMode {
+        case .smartOnly:
+            sourceCrates = libraryService.smartCrates
+        case .all, .hiddenOnly:
+            sourceCrates = libraryService.crates + libraryService.smartCrates
+        }
+
+        let descendantCrates = sourceCrates
             .filter { $0.pathComponents.starts(with: pathPrefix) }
 
         var seen = Set<String>()
