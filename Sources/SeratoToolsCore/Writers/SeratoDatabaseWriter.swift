@@ -48,7 +48,23 @@ public enum SeratoDatabaseWriter {
         to newPath: String,
         in fileData: Data
     ) -> (data: Data, didRewrite: Bool) {
-        var didRewrite = false
+        let rewritten = rewritingPaths([oldPath: newPath], in: fileData)
+        return (rewritten.data, rewritten.rewrittenCount > 0)
+    }
+
+    /// Rewrites the `pfil` field of every `otrk` record whose current
+    /// decoded path exists in `pathMap`, replacing it with the mapped
+    /// destination path. Returns the new file contents and how many track
+    /// records were updated.
+    public static func rewritingPaths(
+        _ pathMap: [String: String],
+        in fileData: Data
+    ) -> (data: Data, rewrittenCount: Int) {
+        guard !pathMap.isEmpty else {
+            return (fileData, 0)
+        }
+
+        var rewrittenCount = 0
         let topLevel = SeratoChunkCodec.readChunks(from: fileData)
 
         let newChunks: [SeratoChunk] = topLevel.map { chunk in
@@ -56,12 +72,12 @@ public enum SeratoDatabaseWriter {
             let fields = SeratoChunkCodec.readChunks(from: chunk.payload)
             guard
                 let pfilField = fields.first(where: { $0.tag == "pfil" }),
-                SeratoChunkCodec.decodeUTF16BEString(pfilField.payload) == oldPath
+                let newPath = pathMap[SeratoChunkCodec.decodeUTF16BEString(pfilField.payload)]
             else {
                 return chunk
             }
 
-            didRewrite = true
+            rewrittenCount += 1
             let newFields = fields.map { field -> SeratoChunk in
                 guard field.tag == "pfil" else { return field }
                 return SeratoChunk(tag: "pfil", payload: SeratoChunkCodec.encodeUTF16BEString(newPath))
@@ -69,7 +85,7 @@ public enum SeratoDatabaseWriter {
             return SeratoChunk(tag: "otrk", payload: SeratoChunkCodec.writeChunks(newFields))
         }
 
-        return (SeratoChunkCodec.writeChunks(newChunks), didRewrite)
+        return (SeratoChunkCodec.writeChunks(newChunks), rewrittenCount)
     }
 
     /// Removes every `otrk` record whose `pfil` equals any of `paths`.

@@ -18,6 +18,10 @@ public final class LibraryService: ObservableObject {
         SeratoLibraryLocator.databaseFile(in: libraryDirectory)
     }
 
+    public var rootDirectory: URL {
+        SeratoLibraryLocator.rootDirectory(for: libraryDirectory)
+    }
+
     public var subcratesDirectory: URL {
         SeratoLibraryLocator.subcratesDirectory(in: libraryDirectory)
     }
