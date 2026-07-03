@@ -56,8 +56,9 @@ struct LibraryConsolidationView: View {
     private var heroCard: some View {
         VStack(alignment: .leading, spacing: 8) {
             Text("Library Consolidation")
-                .font(.system(size: 28, weight: .bold, design: .rounded))
+                .font(.system(size: 32, weight: .semibold, design: .default))
             Text("Map where your music is scattered, then copy or move everything into one central folder while rewriting Serato paths so crates and library references stay intact.")
+                .font(.body)
                 .foregroundStyle(.secondary)
 
             if let successMessage {
@@ -91,17 +92,18 @@ struct LibraryConsolidationView: View {
     }
 
     private var destinationCard: some View {
-        VStack(alignment: .leading, spacing: 10) {
+        VStack(alignment: .leading, spacing: 14) {
             Text("Central Folder")
-                .font(.headline)
+                .font(.title.weight(.semibold))
 
             Picker("Transfer Mode", selection: $transferMode) {
                 Text("Move Files").tag(LibraryConsolidationService.FileTransferMode.move)
                 Text("Copy Files").tag(LibraryConsolidationService.FileTransferMode.copy)
             }
             .pickerStyle(.segmented)
+            .controlSize(.large)
 
-            HStack(spacing: 8) {
+            HStack(spacing: 10) {
                 TextField("Destination folder", text: $destinationPath)
                     .textFieldStyle(.roundedBorder)
                 Button("Browse…") {
@@ -116,25 +118,26 @@ struct LibraryConsolidationView: View {
                 }
                 .disabled(shouldDisableConsolidationAction)
             }
+            .controlSize(.large)
 
             Text("Destination: \(currentDestinationURL.path)")
-                .font(.caption)
+                .font(.callout)
                 .foregroundStyle(.secondary)
 
             if transferMode == .copy, isCopyBlockedByCapacity {
                 Text(copyModeDisableReason)
-                    .font(.caption)
+                    .font(.footnote)
                     .foregroundStyle(.red)
             }
         }
-        .padding(16)
+        .padding(20)
         .background(RoundedRectangle(cornerRadius: 12).fill(Color(nsColor: .controlBackgroundColor).opacity(0.55)))
     }
 
     private var summaryRow: some View {
         VStack(alignment: .leading, spacing: 10) {
             Text("Source Stats")
-                .font(.headline)
+                .font(.title3.weight(.semibold))
 
             HStack(spacing: 10) {
                 summaryTag(title: "Source Locations", value: "\(preview?.sourceGroups.count ?? 0)", accent: true)
@@ -153,7 +156,7 @@ struct LibraryConsolidationView: View {
     private var destinationSpaceCard: some View {
         VStack(alignment: .leading, spacing: 10) {
             Text("Destination Capacity")
-                .font(.headline)
+                .font(.title3.weight(.semibold))
 
             HStack(spacing: 10) {
                 summaryTag(title: "Destination Free", value: destinationAvailableBytes.map(formatGB) ?? "Unknown")
@@ -163,7 +166,7 @@ struct LibraryConsolidationView: View {
             }
 
             Text(spaceStatusDetail)
-                .font(.caption)
+                .font(.footnote)
                 .foregroundStyle(.secondary)
         }
         .padding(16)
@@ -171,36 +174,42 @@ struct LibraryConsolidationView: View {
     }
 
     private var sourceGroupsCard: some View {
-        VStack(alignment: .leading, spacing: 10) {
+        VStack(alignment: .leading, spacing: 4) {
             Text("Music Sources")
-                .font(.headline)
+                .font(.title3.weight(.semibold))
 
             if let preview, !preview.sourceGroups.isEmpty {
-                VStack(spacing: 8) {
+                VStack(spacing: 4) {
                     ForEach(preview.sourceGroups) { group in
-                        HStack(alignment: .top, spacing: 12) {
-                            VStack(alignment: .leading, spacing: 2) {
+                        VStack(alignment: .leading, spacing: 3) {
+                            HStack(alignment: .top, spacing: 12) {
                                 Text(group.title)
-                                    .font(.body.weight(.semibold))
-                                Text(group.examplePath)
-                                    .font(.caption)
-                                    .foregroundStyle(.secondary)
+                                    .font(.system(size: 18, weight: .semibold, design: .default))
+                                Spacer(minLength: 0)
+                                VStack(alignment: .trailing, spacing: 2) {
+                                    Text("\(group.trackCount) tracks")
+                                        .font(.callout.weight(.semibold))
+                                    Text(formatGB(group.totalBytes))
+                                        .font(.footnote)
+                                        .foregroundStyle(.secondary)
+                                }
                             }
-                            Spacer(minLength: 0)
-                            VStack(alignment: .trailing, spacing: 2) {
-                                Text("\(group.trackCount) tracks")
-                                    .font(.body.weight(.semibold))
-                                Text(formatGB(group.totalBytes))
-                                    .font(.caption)
-                                    .foregroundStyle(.secondary)
-                            }
+
+                            Text(group.examplePath)
+                                .font(.callout)
+                                .foregroundStyle(.secondary)
+                                .textSelection(.enabled)
+                                .lineLimit(nil)
+                                .fixedSize(horizontal: false, vertical: true)
                         }
-                        .padding(12)
+                        .padding(.horizontal, 12)
+                        .padding(.vertical, 7)
                         .background(RoundedRectangle(cornerRadius: 10).fill(Color(nsColor: .windowBackgroundColor)))
                     }
                 }
             } else {
                 Text("No track files are queued for movement with the current destination.")
+                    .font(.callout)
                     .foregroundStyle(.secondary)
             }
         }
@@ -211,10 +220,10 @@ struct LibraryConsolidationView: View {
     private func summaryTag(title: String, value: String, accent: Bool = false) -> some View {
         VStack(alignment: .leading, spacing: 2) {
             Text(title)
-                .font(.caption)
+                .font(.footnote)
                 .foregroundStyle(accent ? .white.opacity(0.92) : .secondary)
             Text(value)
-                .font(.system(size: 28, weight: .bold, design: .rounded))
+                .font(.system(size: 26, weight: .semibold, design: .default))
                 .monospacedDigit()
                 .foregroundStyle(accent ? .white : .primary)
         }

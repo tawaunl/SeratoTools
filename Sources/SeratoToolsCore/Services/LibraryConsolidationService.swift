@@ -92,7 +92,8 @@ public enum LibraryConsolidationService {
         let destinationRoot = destinationFolderURL.standardizedFileURL
         var moves: [LibraryConsolidationPreview.Move] = []
         var groupCounts: [String: Int] = [:]
-        var groupExamples: [String: String] = [:]
+        var groupTitles: [String: String] = [:]
+        var groupPaths: [String: String] = [:]
         var reservedDestinations = Set<String>()
         var seenStoredPaths = Set<String>()
         var skippedMissingCount = 0
@@ -146,19 +147,23 @@ public enum LibraryConsolidationService {
                     displayName: track.title.isEmpty ? sourceURL.lastPathComponent : track.title
                 )
             )
-            groupCounts[descriptor.title, default: 0] += 1
-            groupExamples[descriptor.title] = descriptor.examplePath
-            groupBytes[descriptor.title, default: 0] += fileSize
+
+            let groupDirectory = sourceGroupDirectory(for: sourceURL, baseURL: descriptor.baseURL)
+            let groupKey = groupDirectory.path
+            groupCounts[groupKey, default: 0] += 1
+            groupTitles[groupKey] = groupDirectory.lastPathComponent.isEmpty ? descriptor.title : groupDirectory.lastPathComponent
+            groupPaths[groupKey] = groupDirectory.path
+            groupBytes[groupKey, default: 0] += fileSize
             queuedTransferBytes += fileSize
         }
 
-        let sourceGroups = groupCounts.keys.sorted().map { title in
+        let sourceGroups = groupCounts.keys.sorted().map { key in
             LibraryConsolidationPreview.SourceGroup(
-                id: title,
-                title: title,
-                trackCount: groupCounts[title] ?? 0,
-                examplePath: groupExamples[title] ?? "",
-                totalBytes: groupBytes[title] ?? 0
+                id: key,
+                title: groupTitles[key] ?? "Source",
+                trackCount: groupCounts[key] ?? 0,
+                examplePath: groupPaths[key] ?? key,
+                totalBytes: groupBytes[key] ?? 0
             )
         }
 
@@ -370,5 +375,22 @@ public enum LibraryConsolidationService {
         let childComponents = child.standardizedFileURL.pathComponents
         let parentComponents = parent.standardizedFileURL.pathComponents
         return childComponents.starts(with: parentComponents)
+    }
+
+    private static func sourceGroupDirectory(for sourceURL: URL, baseURL: URL) -> URL {
+        let sourceDirectory = sourceURL.deletingLastPathComponent().standardizedFileURL
+        let baseComponents = baseURL.standardizedFileURL.pathComponents
+        let sourceComponents = sourceDirectory.pathComponents
+
+        guard sourceComponents.starts(with: baseComponents) else {
+            return sourceDirectory
+        }
+
+        let relativeComponents = Array(sourceComponents.dropFirst(baseComponents.count))
+        guard let first = relativeComponents.first else {
+            return baseURL.standardizedFileURL
+        }
+
+        return baseURL.standardizedFileURL.appendingPathComponent(first, isDirectory: true)
     }
 }
