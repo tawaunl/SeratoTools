@@ -19,8 +19,8 @@ struct LibraryConsolidationView: View {
         ScrollView {
             VStack(alignment: .leading, spacing: 16) {
                 heroCard
-                destinationCard
                 summaryRow
+                destinationCard
                 sourceGroupsCard
                 destinationSpaceCard
             }
@@ -42,9 +42,7 @@ struct LibraryConsolidationView: View {
     }
 
     private var defaultDestinationFolder: URL {
-        FileManager.default.homeDirectoryForCurrentUser
-            .appendingPathComponent("Music", isDirectory: true)
-            .appendingPathComponent("Serato Consolidated Library", isDirectory: true)
+        libraryService.libraryDirectory
     }
 
     private var currentDestinationURL: URL {
@@ -123,7 +121,7 @@ struct LibraryConsolidationView: View {
                 .font(.caption)
                 .foregroundStyle(.secondary)
 
-            if transferMode == .copy, !hasEnoughSpaceForCopy {
+            if transferMode == .copy, isCopyBlockedByCapacity {
                 Text(copyModeDisableReason)
                     .font(.caption)
                     .foregroundStyle(.red)
@@ -134,14 +132,21 @@ struct LibraryConsolidationView: View {
     }
 
     private var summaryRow: some View {
-        HStack(spacing: 10) {
-            summaryTag(title: "Library Size", value: formatGB(preview?.totalExistingBytes ?? 0))
-            summaryTag(title: transferMode == .copy ? "Will Copy" : "Will Move", value: formatGB(preview?.queuedTransferBytes ?? 0), accent: true)
-            summaryTag(title: "Already Centralized", value: formatGB(preview?.alreadyConsolidatedBytes ?? 0))
-            summaryTag(title: "Copy Space Needed", value: formatGB(copyModeRequiredBytes))
-            summaryTag(title: "Source Locations", value: "\(preview?.sourceGroups.count ?? 0)")
-            summaryTag(title: "Tracks To Process", value: "\(preview?.totalMoves ?? 0)")
-            Spacer(minLength: 0)
+        VStack(alignment: .leading, spacing: 10) {
+            Text("Source Stats")
+                .font(.headline)
+
+            HStack(spacing: 10) {
+                summaryTag(title: "Source Locations", value: "\(preview?.sourceGroups.count ?? 0)", accent: true)
+                summaryTag(title: "Tracks To Process", value: "\(preview?.totalMoves ?? 0)", accent: true)
+                summaryTag(title: transferMode == .copy ? "Will Copy" : "Will Move", value: formatGB(preview?.queuedTransferBytes ?? 0), accent: true)
+            }
+
+            HStack(spacing: 10) {
+                summaryTag(title: "Library Size", value: formatGB(preview?.totalExistingBytes ?? 0))
+                summaryTag(title: "Already Centralized", value: formatGB(preview?.alreadyConsolidatedBytes ?? 0))
+                summaryTag(title: "Copy Space Needed", value: formatGB(copyModeRequiredBytes))
+            }
         }
     }
 
@@ -247,10 +252,7 @@ struct LibraryConsolidationView: View {
         if isRunning || (preview?.moves.isEmpty ?? true) {
             return true
         }
-        if transferMode == .copy {
-            return !hasEnoughSpaceForCopy
-        }
-        return false
+        return isCopyBlockedByCapacity
     }
 
     private var copyModeRequiredBytes: Int64 {
@@ -260,6 +262,12 @@ struct LibraryConsolidationView: View {
     private var hasEnoughSpaceForCopy: Bool {
         guard let available = destinationAvailableBytes else { return false }
         return available >= copyModeRequiredBytes
+    }
+
+    private var isCopyBlockedByCapacity: Bool {
+        guard transferMode == .copy else { return false }
+        guard let available = destinationAvailableBytes else { return false }
+        return available < copyModeRequiredBytes
     }
 
     private var spaceStatusLabel: String {
@@ -284,11 +292,7 @@ struct LibraryConsolidationView: View {
     }
 
     private var copyModeDisableReason: String {
-        guard let available = destinationAvailableBytes else {
-            return "Copy is disabled until destination free space can be read."
-        }
-
-        if available >= copyModeRequiredBytes {
+        guard let available = destinationAvailableBytes, available < copyModeRequiredBytes else {
             return ""
         }
 
@@ -312,12 +316,47 @@ struct LibraryConsolidationView: View {
 
     private func refreshDestinationCapacity() {
         let referenceURL = existingAncestor(of: currentDestinationURL) ?? currentDestinationURL
-        do {
-            let values = try referenceURL.resourceValues(forKeys: [.volumeAvailableCapacityForImportantUsageKey])
-            destinationAvailableBytes = values.volumeAvailableCapacityForImportantUsage
-        } catch {
-            destinationAvailableBytes = nil
+        destinationAvailableBytes = detectedAvailableBytes(at: referenceURL)
+    }
+
+    private func detectedAvailableBytes(at referenceURL: URL) -> Int64? {
+        let candidateFromResourceValues: Int64? = {
+            do {
+                let values = try referenceURL.resourceValues(forKeys: [
+                    .volumeAvailableCapacityForImportantUsageKey,
+                    .volumeAvailableCapacityForOpportunisticUsageKey,
+                    .volumeAvailableCapacityKey
+                ])
+                if let important = values.volumeAvailableCapacityForImportantUsage, important > 0 {
+                    return important
+                }
+                if let opportunistic = values.volumeAvailableCapacityForOpportunisticUsage, opportunistic > 0 {
+                    return opportunistic
+                }
+                if let legacy = values.volumeAvailableCapacity, legacy > 0 {
+                    return Int64(legacy)
+                }
+                return nil
+            } catch {
+                return nil
+            }
+        }()
+
+        if let candidateFromResourceValues {
+            return candidateFromResourceValues
         }
+
+        // Fallback: file-system attributes are more reliable on some mounted
+        // volumes and sandboxed contexts where URL resource values can report 0.
+        if let attributes = try? FileManager.default.attributesOfFileSystem(forPath: referenceURL.path),
+           let freeSizeNumber = attributes[.systemFreeSize] as? NSNumber {
+            let freeBytes = freeSizeNumber.int64Value
+            if freeBytes > 0 {
+                return freeBytes
+            }
+        }
+
+        return nil
     }
 
     private func existingAncestor(of url: URL) -> URL? {
