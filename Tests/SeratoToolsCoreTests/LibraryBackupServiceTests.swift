@@ -36,6 +36,8 @@ private func relativePath(from url: URL, baseURL: URL) -> String {
     return path
 }
 
+private let fixedTimestamp = Date(timeIntervalSince1970: 1_700_000_000)
+
 @Suite(.serialized)
 struct LibraryBackupServiceTests {
     @Test func fullBackupCopiesSeratoFolderAndTracks() throws {
@@ -55,7 +57,8 @@ struct LibraryBackupServiceTests {
             tracks: selectedTracks,
             crates: scratch.crates,
             libraryDirectory: scratch.libraryDirectory,
-            rootDirectory: scratch.rootDirectory
+            rootDirectory: scratch.rootDirectory,
+            timestamp: fixedTimestamp
         )
 
         #expect(result.copiedSeratoFolder)
@@ -89,7 +92,8 @@ struct LibraryBackupServiceTests {
             tracks: firstBatch,
             crates: scratch.crates,
             libraryDirectory: scratch.libraryDirectory,
-            rootDirectory: scratch.rootDirectory
+            rootDirectory: scratch.rootDirectory,
+            timestamp: fixedTimestamp
         )
 
         let incrementalResult = try LibraryBackupService.backup(
@@ -98,7 +102,8 @@ struct LibraryBackupServiceTests {
             tracks: firstBatch + [thirdTrack],
             crates: scratch.crates,
             libraryDirectory: scratch.libraryDirectory,
-            rootDirectory: scratch.rootDirectory
+            rootDirectory: scratch.rootDirectory,
+            timestamp: fixedTimestamp.addingTimeInterval(60)
         )
 
         #expect(incrementalResult.copiedTrackCount == 1)
@@ -126,11 +131,13 @@ struct LibraryBackupServiceTests {
             crates: scratch.crates,
             selectedCrateID: crate.id,
             libraryDirectory: scratch.libraryDirectory,
-            rootDirectory: scratch.rootDirectory
+            rootDirectory: scratch.rootDirectory,
+            timestamp: fixedTimestamp
         )
 
         #expect(result.copiedSeratoFolder == false)
         #expect(result.copiedCrateCount == 1)
+        #expect(result.backupRootURL.lastPathComponent.contains("Mike's Party"))
         #expect(FileManager.default.fileExists(atPath: result.backupRootURL.appendingPathComponent("Crates/Subcrates/Mike's Party.crate").path))
     }
 }

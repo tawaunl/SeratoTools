@@ -7,7 +7,17 @@ public struct LibraryBackupResult: Sendable {
     public let copiedTrackCount: Int
     public let skippedTrackCount: Int
     public let copiedCrateCount: Int
+    public let copiedByteCount: Int64
     public let note: String?
+}
+
+public struct LibraryBackupPreview: Sendable {
+    public let trackCount: Int
+    public let crateCount: Int
+    public let estimatedByteCount: Int64
+    public let crateName: String?
+    public let mode: LibraryBackupService.BackupMode
+    public let backupRootName: String
 }
 
 public enum LibraryBackupService {
@@ -100,6 +110,69 @@ public enum LibraryBackupService {
         let backupRootURL: URL
         let previousManifest: BackupManifest?
         let note: String?
+        let rootName: String
+    }
+
+    public static func preview(
+        destinationFolderURL: URL,
+        mode: BackupMode,
+        tracks: [Track],
+        crates: [Crate],
+        selectedCrateID: UUID? = nil,
+        libraryDirectory: URL,
+        rootDirectory: URL,
+        timestamp: Date = Date(),
+        fileManager: FileManager = .default
+    ) throws -> LibraryBackupPreview {
+        let context = try prepareContext(
+            destinationFolderURL: destinationFolderURL,
+            mode: mode,
+            tracks: tracks,
+            crates: crates,
+            selectedCrateID: selectedCrateID,
+            timestamp: timestamp,
+            fileManager: fileManager
+        )
+
+        switch mode {
+        case .full:
+            let tracksToCopy = tracksToBackUp(tracks: tracks, mode: mode, previousManifest: context.previousManifest, fileManager: fileManager)
+            let trackBytes = byteCount(of: tracksToCopy, fileManager: fileManager)
+            let seratoBytes = itemByteSize(at: libraryDirectory, fileManager: fileManager) ?? 0
+            return LibraryBackupPreview(
+                trackCount: tracksToCopy.count,
+                crateCount: crates.count,
+                estimatedByteCount: trackBytes + seratoBytes,
+                crateName: nil,
+                mode: mode,
+                backupRootName: context.rootName
+            )
+        case .incremental:
+            let tracksToCopy = tracksToBackUp(tracks: tracks, mode: mode, previousManifest: context.previousManifest, fileManager: fileManager)
+            let trackBytes = byteCount(of: tracksToCopy, fileManager: fileManager)
+            let seratoBytes = itemByteSize(at: libraryDirectory, fileManager: fileManager) ?? 0
+            return LibraryBackupPreview(
+                trackCount: tracksToCopy.count,
+                crateCount: crates.count,
+                estimatedByteCount: trackBytes + seratoBytes,
+                crateName: nil,
+                mode: mode,
+                backupRootName: context.rootName
+            )
+        case .singleCrate:
+            let crate = try resolvedCrate(from: crates, selectedCrateID: selectedCrateID)
+            let selectedTrackPaths = Set(crate.trackPaths)
+            let selectedTracks = tracks.filter { selectedTrackPaths.contains($0.seratoStoredPath) }
+            let crateBytes = itemByteSize(at: crate.fileURL ?? libraryDirectory, fileManager: fileManager) ?? 0
+            return LibraryBackupPreview(
+                trackCount: selectedTracks.count,
+                crateCount: 1,
+                estimatedByteCount: byteCount(of: selectedTracks, fileManager: fileManager) + crateBytes,
+                crateName: crate.name.isEmpty ? crate.fileURL?.deletingPathExtension().lastPathComponent : crate.name,
+                mode: mode,
+                backupRootName: context.rootName
+            )
+        }
     }
 
     public static func backup(
@@ -200,6 +273,7 @@ public enum LibraryBackupService {
             copiedTrackCount: copiedTrackSourcePaths.count,
             skippedTrackCount: max(0, tracks.count - copiedTrackSourcePaths.count),
             copiedCrateCount: copiedCrateSourcePaths.count,
+            copiedByteCount: byteCount(of: copiedTrackSourcePaths, fileManager: fileManager),
             note: context.note
         )
     }
@@ -243,8 +317,14 @@ public enum LibraryBackupService {
         try fileManager.createDirectory(at: backupContainerURL, withIntermediateDirectories: true)
 
         let previousManifest = try latestBackupManifest(in: backupContainerURL, fileManager: fileManager)
+        let rootName = backupRootName(
+            mode: mode,
+            crates: crates,
+            selectedCrateID: selectedCrateID,
+            timestamp: timestamp
+        )
         let backupRootURL = uniqueBackupRootURL(
-            backupContainerURL.appendingPathComponent(timestampString(from: timestamp), isDirectory: true),
+            backupContainerURL.appendingPathComponent(rootName, isDirectory: true),
             fileManager: fileManager
         )
 
@@ -266,7 +346,8 @@ public enum LibraryBackupService {
         return BackupContext(
             backupRootURL: backupRootURL,
             previousManifest: previousManifest,
-            note: note
+            note: note,
+            rootName: rootName
         )
     }
 
@@ -377,6 +458,27 @@ public enum LibraryBackupService {
         return copiedPaths
     }
 
+    private static func itemByteSize(at url: URL, fileManager: FileManager) -> Int64? {
+        guard let attributes = try? fileManager.attributesOfItem(atPath: url.path),
+              let size = attributes[.size] as? NSNumber else {
+            return nil
+        }
+        return size.int64Value
+    }
+
+    private static func byteCount(of tracks: [Track], fileManager: FileManager) -> Int64 {
+        tracks.reduce(0) { partialResult, track in
+            partialResult + (itemByteSize(at: track.fileURL, fileManager: fileManager) ?? 0)
+        }
+    }
+
+    private static func byteCount(of copiedTrackPaths: [String], fileManager: FileManager) -> Int64 {
+        copiedTrackPaths.reduce(0) { partialResult, path in
+            let url = URL(fileURLWithPath: path)
+            return partialResult + (itemByteSize(at: url, fileManager: fileManager) ?? 0)
+        }
+    }
+
     private static func copyItem(
         _ sourceURL: URL,
         to destinationURL: URL,
@@ -415,6 +517,26 @@ public enum LibraryBackupService {
         formatter.timeZone = TimeZone.current
         formatter.dateFormat = "yyyy-MM-dd_HH-mm-ss"
         return formatter.string(from: date)
+    }
+
+    private static func backupRootName(mode: BackupMode, crates: [Crate], selectedCrateID: UUID?, timestamp: Date) -> String {
+        let stamped = timestampString(from: timestamp)
+        switch mode {
+        case .singleCrate:
+            let crateName = crates.first(where: { $0.id == selectedCrateID })?.name
+                ?? crates.first(where: { $0.id == selectedCrateID })?.fileURL?.deletingPathExtension().lastPathComponent
+                ?? "Crate"
+            return "\(stamped) - \(sanitizedFolderName(crateName))"
+        case .full:
+            return stamped
+        case .incremental:
+            return "\(stamped) - Incremental"
+        }
+    }
+
+    private static func sanitizedFolderName(_ name: String) -> String {
+        let invalid = CharacterSet(charactersIn: "/:")
+        return name.components(separatedBy: invalid).joined(separator: "-")
     }
 
     private static func relativePath(from fileURL: URL, baseURL: URL) -> String {

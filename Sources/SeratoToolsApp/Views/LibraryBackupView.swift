@@ -8,17 +8,14 @@ struct LibraryBackupView: View {
     @State private var destinationPath = ""
     @State private var selectedMode: LibraryBackupService.BackupMode = .full
     @State private var selectedCrateID: UUID?
+    @State private var preview: LibraryBackupPreview?
+    @State private var previewTask: Task<Void, Never>?
     @State private var isRunning = false
     @State private var errorMessage: String?
     @State private var successMessage: String?
 
     private var availableCrates: [Crate] {
         libraryService.crates + libraryService.smartCrates
-    }
-
-    private var selectedCrate: Crate? {
-        guard let selectedCrateID else { return availableCrates.first }
-        return availableCrates.first(where: { $0.id == selectedCrateID })
     }
 
     private var destinationURL: URL {
@@ -29,10 +26,15 @@ struct LibraryBackupView: View {
         return URL(fileURLWithPath: trimmed)
     }
 
+    private var activePreview: LibraryBackupPreview? {
+        preview
+    }
+
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 16) {
                 heroCard
+                statsCard
                 destinationCard
                 modeCard
                 actionCard
@@ -46,11 +48,26 @@ struct LibraryBackupView: View {
             if selectedCrateID == nil {
                 selectedCrateID = availableCrates.first?.id
             }
+            refreshPreview()
         }
         .onChange(of: availableCrates.count) {
             if selectedCrateID == nil {
                 selectedCrateID = availableCrates.first?.id
             }
+            refreshPreview()
+        }
+        .onChange(of: destinationPath) {
+            refreshPreview()
+        }
+        .onChange(of: selectedMode) {
+            refreshPreview()
+        }
+        .onChange(of: selectedCrateID) {
+            refreshPreview()
+        }
+        .onDisappear {
+            previewTask?.cancel()
+            previewTask = nil
         }
     }
 
@@ -90,6 +107,41 @@ struct LibraryBackupView: View {
             RoundedRectangle(cornerRadius: 14)
                 .stroke(Color.accentColor.opacity(0.22), lineWidth: 1)
         )
+    }
+
+    private var statsCard: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text("Pre-Backup Stats")
+                .font(.title3.weight(.semibold))
+
+            HStack(spacing: 10) {
+                statTag(title: "Tracks", value: "\(activePreview?.trackCount ?? 0)")
+                statTag(title: "Crates", value: "\(activePreview?.crateCount ?? 0)")
+                statTag(title: "Backup Size", value: activePreview.map { formatBytes($0.estimatedByteCount) } ?? "--")
+                Spacer(minLength: 0)
+            }
+
+            Text(statsDetail)
+                .font(.footnote)
+                .foregroundStyle(.secondary)
+        }
+        .padding(16)
+        .background(RoundedRectangle(cornerRadius: 12).fill(Color(nsColor: .controlBackgroundColor).opacity(0.55)))
+    }
+
+    private func statTag(title: String, value: String) -> some View {
+        VStack(alignment: .leading, spacing: 2) {
+            Text(title)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            Text(value)
+                .font(.headline.weight(.semibold))
+                .monospacedDigit()
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 8)
+        .background(RoundedRectangle(cornerRadius: 10).fill(Color(nsColor: .windowBackgroundColor)))
+        .overlay(RoundedRectangle(cornerRadius: 10).stroke(Color.secondary.opacity(0.25), lineWidth: 1))
     }
 
     private var destinationCard: some View {
@@ -177,16 +229,31 @@ struct LibraryBackupView: View {
     }
 
     private var summaryText: String {
-        switch selectedMode {
-        case .full:
-            return "Will copy \(libraryService.tracks.count) track(s) and the full Serato folder."
-        case .incremental:
-            return "Will copy track files that are not already in the latest backup, plus the full Serato folder."
-        case .singleCrate:
-            if let selectedCrate {
-                return "Will package \(selectedCrate.name.isEmpty ? selectedCrate.fileURL?.lastPathComponent ?? "the selected crate" : selectedCrate.name)."
+        activePreview.map { preview in
+            switch preview.mode {
+            case .full:
+                return "Will copy \(preview.trackCount) track(s) and the full Serato folder into \(preview.backupRootName)."
+            case .incremental:
+                return "Will top up the latest backup with new tracks and store it in \(preview.backupRootName)."
+            case .singleCrate:
+                let crateLabel = preview.crateName ?? "the selected crate"
+                return "Will package \(crateLabel) into \(preview.backupRootName)."
             }
-            return "Choose a crate to package."
+        } ?? "Builds a timestamped backup folder before you run it."
+    }
+
+    private var statsDetail: String {
+        guard let preview = activePreview else {
+            return "Choose a destination and backup mode to calculate the backup size."
+        }
+
+        switch preview.mode {
+        case .full:
+            return "Full backups include the whole Serato folder plus your track files."
+        case .incremental:
+            return "Incremental backups estimate the new track files plus the full Serato folder."
+        case .singleCrate:
+            return "Single-crate backups package one crate file and the tracks it references."
         }
     }
 
@@ -207,6 +274,45 @@ struct LibraryBackupView: View {
 
         if panel.runModal() == .OK, let url = panel.url {
             destinationPath = url.path
+        }
+    }
+
+    private func refreshPreview() {
+        previewTask?.cancel()
+
+        let destination = destinationURL
+        let mode = selectedMode
+        let crateSelection = selectedCrateID
+        let tracks = libraryService.tracks
+        let crates = availableCrates
+        let libraryDirectory = libraryService.libraryDirectory
+        let rootDirectory = libraryService.rootDirectory
+
+        previewTask = Task {
+            do {
+                let computedPreview = try await Task.detached(priority: .userInitiated) {
+                    try LibraryBackupService.preview(
+                        destinationFolderURL: destination,
+                        mode: mode,
+                        tracks: tracks,
+                        crates: crates,
+                        selectedCrateID: crateSelection,
+                        libraryDirectory: libraryDirectory,
+                        rootDirectory: rootDirectory
+                    )
+                }.value
+
+                guard !Task.isCancelled else { return }
+                await MainActor.run {
+                    preview = computedPreview
+                }
+            } catch {
+                guard !Task.isCancelled else { return }
+                await MainActor.run {
+                    preview = nil
+                    errorMessage = error.localizedDescription
+                }
+            }
         }
     }
 
@@ -249,5 +355,10 @@ struct LibraryBackupView: View {
                 }
             }
         }
+    }
+
+    private func formatBytes(_ bytes: Int64) -> String {
+        let gigabytes = Double(bytes) / 1_073_741_824
+        return String(format: "%.2f GB", gigabytes)
     }
 }
