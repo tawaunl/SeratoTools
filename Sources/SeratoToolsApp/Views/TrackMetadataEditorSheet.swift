@@ -5,7 +5,7 @@ struct TrackMetadataEditorSheet: View {
     @Environment(\.dismiss) private var dismiss
 
     let track: Track
-    let onSave: (SeratoTrackMetadataUpdate) -> Void
+    let onSave: (SeratoTrackMetadataUpdate) throws -> Void
 
     @State private var title: String
     @State private var artist: String
@@ -19,8 +19,9 @@ struct TrackMetadataEditorSheet: View {
     @State private var lookupResults: [OnlineTrackMetadataCandidate] = []
     @State private var isSearchingOnline = false
     @State private var lookupErrorMessage: String?
+    @State private var saveErrorMessage: String?
 
-    init(track: Track, onSave: @escaping (SeratoTrackMetadataUpdate) -> Void) {
+    init(track: Track, onSave: @escaping (SeratoTrackMetadataUpdate) throws -> Void) {
         self.track = track
         self.onSave = onSave
         _title = State(initialValue: track.title)
@@ -68,6 +69,12 @@ struct TrackMetadataEditorSheet: View {
                     .foregroundStyle(.red)
             }
 
+            if let saveErrorMessage {
+                Text(saveErrorMessage)
+                    .font(.caption)
+                    .foregroundStyle(.red)
+            }
+
             if !lookupResults.isEmpty {
                 VStack(alignment: .leading, spacing: 6) {
                     Text("Online Matches")
@@ -89,8 +96,32 @@ struct TrackMetadataEditorSheet: View {
 
                                     Spacer(minLength: 0)
 
-                                    Button("Use") {
+                                    Button("Use All") {
                                         apply(candidate: candidate)
+                                    }
+                                }
+
+                                FlowLayout(spacing: 6) {
+                                    if !candidate.title.isEmpty {
+                                        fieldButton("Title") { title = candidate.title }
+                                    }
+                                    if !candidate.artist.isEmpty {
+                                        fieldButton("Artist") { artist = candidate.artist }
+                                    }
+                                    if !candidate.album.isEmpty {
+                                        fieldButton("Album") { album = candidate.album }
+                                    }
+                                    if !candidate.genre.isEmpty {
+                                        fieldButton("Genre") { genre = candidate.genre }
+                                    }
+                                    if let year = candidate.year {
+                                        fieldButton("Year") { yearText = String(year) }
+                                    }
+                                    if let bpm = candidate.bpm {
+                                        fieldButton("BPM") { bpmText = String(format: "%.0f", bpm) }
+                                    }
+                                    if !candidate.comment.isEmpty {
+                                        fieldButton("Comment") { comment = candidate.comment }
                                     }
                                 }
                                 .padding(.vertical, 2)
@@ -116,19 +147,23 @@ struct TrackMetadataEditorSheet: View {
                 Spacer()
                 Button("Cancel") { dismiss() }
                 Button("Save") {
-                    onSave(
-                        SeratoTrackMetadataUpdate(
-                            title: title,
-                            artist: artist,
-                            album: album,
-                            genre: genre,
-                            comment: comment,
-                            key: key,
-                            bpm: Double(bpmText.trimmingCharacters(in: .whitespacesAndNewlines)),
-                            year: Int(yearText.trimmingCharacters(in: .whitespacesAndNewlines))
+                    do {
+                        try onSave(
+                            SeratoTrackMetadataUpdate(
+                                title: title,
+                                artist: artist,
+                                album: album,
+                                genre: genre,
+                                comment: comment,
+                                key: key,
+                                bpm: Double(bpmText.trimmingCharacters(in: .whitespacesAndNewlines)),
+                                year: Int(yearText.trimmingCharacters(in: .whitespacesAndNewlines))
+                            )
                         )
-                    )
-                    dismiss()
+                        dismiss()
+                    } catch {
+                        saveErrorMessage = error.localizedDescription
+                    }
                 }
                 .keyboardShortcut(.defaultAction)
             }
@@ -145,6 +180,12 @@ struct TrackMetadataEditorSheet: View {
             TextField(label, text: text)
                 .textFieldStyle(.roundedBorder)
         }
+    }
+
+    private func fieldButton(_ label: String, action: @escaping () -> Void) -> some View {
+        Button(label, action: action)
+            .buttonStyle(.bordered)
+            .controlSize(.small)
     }
 
     private func searchOnline() {
@@ -208,5 +249,64 @@ struct TrackMetadataEditorSheet: View {
         ]
         .filter { !$0.isEmpty }
         .joined(separator: " • ")
+    }
+}
+
+private struct FlowLayout: Layout {
+    var spacing: CGFloat = 6
+
+    func sizeThatFits(
+        proposal: ProposedViewSize,
+        subviews: Subviews,
+        cache: inout ()
+    ) -> CGSize {
+        let maxWidth = proposal.width ?? .infinity
+        var currentX: CGFloat = 0
+        var currentY: CGFloat = 0
+        var lineHeight: CGFloat = 0
+        var usedWidth: CGFloat = 0
+
+        for subview in subviews {
+            let size = subview.sizeThatFits(.unspecified)
+            if currentX > 0 && currentX + size.width > maxWidth {
+                currentX = 0
+                currentY += lineHeight + spacing
+                lineHeight = 0
+            }
+
+            usedWidth = max(usedWidth, currentX + size.width)
+            currentX += size.width + spacing
+            lineHeight = max(lineHeight, size.height)
+        }
+
+        return CGSize(width: usedWidth, height: currentY + lineHeight)
+    }
+
+    func placeSubviews(
+        in bounds: CGRect,
+        proposal: ProposedViewSize,
+        subviews: Subviews,
+        cache: inout ()
+    ) {
+        var x = bounds.minX
+        var y = bounds.minY
+        var lineHeight: CGFloat = 0
+
+        for subview in subviews {
+            let size = subview.sizeThatFits(.unspecified)
+            if x > bounds.minX && x + size.width > bounds.maxX {
+                x = bounds.minX
+                y += lineHeight + spacing
+                lineHeight = 0
+            }
+
+            subview.place(
+                at: CGPoint(x: x, y: y),
+                proposal: ProposedViewSize(width: size.width, height: size.height)
+            )
+
+            x += size.width + spacing
+            lineHeight = max(lineHeight, size.height)
+        }
     }
 }

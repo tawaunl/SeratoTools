@@ -171,7 +171,7 @@ struct CrateDetailView: View {
         }
         .sheet(item: $metadataLookupTrack) { track in
             TrackMetadataEditorSheet(track: track) { metadata in
-                applyTrackMetadataEdit(track: track, metadata: metadata)
+                try saveTrackMetadataEdit(track: track, metadata: metadata)
             }
         }
         .onChange(of: node.id) {
@@ -339,15 +339,19 @@ struct CrateDetailView: View {
 
     private func applyTrackMetadataEdit(track: Track, metadata: SeratoTrackMetadataUpdate) {
         do {
-            try SeratoTrackMetadataEditor.update(
-                track: track,
-                metadata: metadata,
-                databaseFileURL: libraryService.databaseFile
-            )
-            onCratesChanged()
+            try saveTrackMetadataEdit(track: track, metadata: metadata)
         } catch {
             trackEditErrorMessage = error.localizedDescription
         }
+    }
+
+    private func saveTrackMetadataEdit(track: Track, metadata: SeratoTrackMetadataUpdate) throws {
+        try SeratoTrackMetadataEditor.update(
+            track: track,
+            metadata: metadata,
+            databaseFileURL: libraryService.databaseFile
+        )
+        onCratesChanged()
     }
 
     private func statTag(title: String, value: Int, isActive: Bool = false, action: (() -> Void)? = nil) -> some View {

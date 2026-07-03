@@ -141,7 +141,7 @@ struct ContentView: View {
         }
         .sheet(item: $metadataLookupTrack) { track in
             TrackMetadataEditorSheet(track: track) { metadata in
-                applyTrackMetadataEdit(track: track, metadata: metadata)
+                try saveTrackMetadataEdit(track: track, metadata: metadata)
             }
         }
         .confirmationDialog(
@@ -169,7 +169,7 @@ struct ContentView: View {
             Text("Choose how to delete \(pendingTrackDeleteSelection.count) selected track\(pendingTrackDeleteSelection.count == 1 ? "" : "s").")
         }
         .alert(
-            "Couldn't Delete Tracks",
+            "Couldn't Complete Operation",
             isPresented: Binding(get: { trackDeleteErrorMessage != nil }, set: { if !$0 { trackDeleteErrorMessage = nil } })
         ) {
             Button("OK") { trackDeleteErrorMessage = nil }
@@ -559,14 +559,18 @@ struct ContentView: View {
 
     private func applyTrackMetadataEdit(track: Track, metadata: SeratoTrackMetadataUpdate) {
         do {
-            try SeratoTrackMetadataEditor.update(
-                track: track,
-                metadata: metadata,
-                databaseFileURL: libraryService.databaseFile
-            )
-            reloadLibrary()
+            try saveTrackMetadataEdit(track: track, metadata: metadata)
         } catch {
             trackDeleteErrorMessage = error.localizedDescription
         }
+    }
+
+    private func saveTrackMetadataEdit(track: Track, metadata: SeratoTrackMetadataUpdate) throws {
+        try SeratoTrackMetadataEditor.update(
+            track: track,
+            metadata: metadata,
+            databaseFileURL: libraryService.databaseFile
+        )
+        reloadLibrary()
     }
 }
