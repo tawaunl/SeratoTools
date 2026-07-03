@@ -14,6 +14,8 @@ struct LibraryConsolidationView: View {
     @State private var successMessage: String?
     @State private var isRunning = false
     @State private var destinationAvailableBytes: Int64?
+    @State private var isRefreshingPreview = false
+    @State private var previewRefreshTask: Task<Void, Never>?
 
     var body: some View {
         ScrollView {
@@ -30,14 +32,18 @@ struct LibraryConsolidationView: View {
             if destinationPath.isEmpty {
                 destinationPath = defaultDestinationFolder.path
             }
-            refreshPreview()
+            schedulePreviewRefresh()
             refreshDestinationCapacity()
         }
         .onChange(of: libraryService.tracks.count) {
-            refreshPreview()
+            schedulePreviewRefresh()
         }
         .onChange(of: destinationPath) {
             refreshDestinationCapacity()
+        }
+        .onDisappear {
+            previewRefreshTask?.cancel()
+            previewRefreshTask = nil
         }
     }
 
@@ -110,7 +116,7 @@ struct LibraryConsolidationView: View {
                     chooseDestinationFolder()
                 }
                 Button("Refresh Preview") {
-                    refreshPreview()
+                    schedulePreviewRefresh()
                 }
                 .disabled(isRunning)
                 Button(actionButtonTitle) {
@@ -212,6 +218,17 @@ struct LibraryConsolidationView: View {
                     .font(.callout)
                     .foregroundStyle(.secondary)
             }
+
+            if isRefreshingPreview {
+                HStack(spacing: 8) {
+                    ProgressView()
+                        .controlSize(.small)
+                    Text("Refreshing source analysis…")
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                }
+                .padding(.top, 2)
+            }
         }
         .padding(16)
         .background(RoundedRectangle(cornerRadius: 12).fill(Color(nsColor: .controlBackgroundColor).opacity(0.55)))
@@ -249,7 +266,7 @@ struct LibraryConsolidationView: View {
 
         if panel.runModal() == .OK, let url = panel.url {
             destinationPath = url.path
-            refreshPreview()
+            schedulePreviewRefresh()
         }
     }
 
@@ -315,12 +332,31 @@ struct LibraryConsolidationView: View {
     }
 
     private func refreshPreview() {
+        schedulePreviewRefresh()
+    }
+
+    private func schedulePreviewRefresh() {
+        previewRefreshTask?.cancel()
+
+        let tracksSnapshot = libraryService.tracks
+        let destinationSnapshot = currentDestinationURL
+
+        isRefreshingPreview = true
         errorMessage = nil
         successMessage = nil
-        preview = LibraryConsolidationService.preview(
-            tracks: libraryService.tracks,
-            destinationFolderURL: currentDestinationURL
-        )
+
+        previewRefreshTask = Task {
+            let computedPreview = await Task.detached(priority: .userInitiated) {
+                LibraryConsolidationService.preview(
+                    tracks: tracksSnapshot,
+                    destinationFolderURL: destinationSnapshot
+                )
+            }.value
+
+            guard !Task.isCancelled else { return }
+            preview = computedPreview
+            isRefreshingPreview = false
+        }
     }
 
     private func refreshDestinationCapacity() {
