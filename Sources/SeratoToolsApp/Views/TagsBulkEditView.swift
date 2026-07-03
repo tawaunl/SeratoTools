@@ -133,6 +133,12 @@ struct TagsBulkEditView: View {
 
     var body: some View {
         VStack(spacing: 0) {
+            SectionHeaderCard(
+                title: "Tags",
+                description: "Bulk-fill missing artist, genre, and year metadata across the scope you choose, then apply lookup results track by track.",
+                icon: "tag"
+            )
+
             HSplitView {
                 crateListPane
                     .frame(minWidth: 260, idealWidth: 280, maxWidth: 320)
@@ -203,6 +209,8 @@ struct TagsBulkEditView: View {
                 }
             }
         }
+        .background(Color(nsColor: .controlBackgroundColor).opacity(0.45))
+        .glowCardStyle(radius: 8, opacity: 0.05)
     }
 
     private var statsHeader: some View {
@@ -240,6 +248,7 @@ struct TagsBulkEditView: View {
         }
         .padding(.horizontal, 10)
         .padding(.top, 10)
+        .glowCardStyle(radius: 8, opacity: 0.05)
     }
 
     private var bulkEditor: some View {
@@ -275,6 +284,9 @@ struct TagsBulkEditView: View {
             }
         }
         .padding(.horizontal, 10)
+        .padding(.vertical, 8)
+        .background(Color(nsColor: .controlBackgroundColor).opacity(0.45))
+        .glowCardStyle(radius: 8, opacity: 0.05)
     }
 
     private func applyBulkMetadata() {

@@ -9,6 +9,12 @@ struct MissingTracksView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
+            SectionHeaderCard(
+                title: "Missing Tracks",
+                description: "Scan for moved or renamed files, then repair the missing entries or gather them into a review crate.",
+                icon: "exclamationmark.triangle"
+            )
+
             HStack {
                 Text("\(missingTracksService.candidates.count) missing tracks")
                     .font(.headline)
@@ -32,6 +38,7 @@ struct MissingTracksView: View {
             List(missingTracksService.candidates) { candidate in
                 MissingTrackRow(candidate: candidate)
             }
+            .background(Color(nsColor: .windowBackgroundColor))
         }
         .navigationTitle("Missing Tracks")
         .task {
@@ -45,6 +52,7 @@ struct MissingTracksView: View {
         } message: {
             Text(resultMessage ?? "")
         }
+        .padding(.horizontal, 8)
     }
 
     private func gatherIntoCrate() {
