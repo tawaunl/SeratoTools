@@ -91,41 +91,10 @@ struct ContentView: View {
 
     var body: some View {
         Group {
-            if selectedSection == .crates {
-                HSplitView {
-                    sidebar
-
-                    VStack(spacing: 0) {
-                        cratesStatsHeader
-
-                        HSplitView {
-                            CrateTreeView(
-                                crateHierarchy: crateHierarchy,
-                                smartCrateHierarchy: smartCrateHierarchy,
-                                selectedNode: $selectedCrateNode,
-                                listFilterMode: crateListFilterMode,
-                                onCratesChanged: reloadLibrary
-                            )
-                            .frame(minWidth: middlePaneWidth, idealWidth: middlePaneWidth, maxWidth: middlePaneWidth)
-
-                            Group {
-                                if let node = selectedCrateNode {
-                                    CrateDetailView(node: node, filterMode: crateListFilterMode, onCratesChanged: reloadLibrary)
-                                } else {
-                                    Text("Select an item")
-                                        .foregroundStyle(.secondary)
-                                }
-                            }
-                            .frame(minWidth: 320, maxWidth: .infinity, maxHeight: .infinity)
-                        }
-                    }
-                }
-            } else {
-                HSplitView {
-                    sidebar
-                    middleContent
-                        .frame(minWidth: 320, maxWidth: .infinity, maxHeight: .infinity)
-                }
+            HSplitView {
+                sidebar
+                middleContent
+                    .frame(minWidth: 320, maxWidth: .infinity, maxHeight: .infinity)
             }
         }
         .task {
@@ -251,6 +220,7 @@ struct ContentView: View {
         .padding(.horizontal, 10)
         .padding(.vertical, 10)
         .background(Color(nsColor: .controlBackgroundColor).opacity(0.7))
+        .glowCardStyle(radius: 8, opacity: 0.06)
     }
 
     private func crateStatTag(
@@ -327,115 +297,124 @@ struct ContentView: View {
                     .foregroundStyle(.secondary)
                     .padding(.horizontal, 8)
 
-                if let loadErrorMessage {
-                    Text("Library load failed: \(loadErrorMessage)")
-                        .font(.callout)
-                        .foregroundStyle(.red)
-                        .padding(.horizontal, 8)
-                        .padding(.top, 8)
-                } else if libraryService.tracks.isEmpty {
-                    Text("No tracks loaded")
-                        .font(.callout)
-                        .foregroundStyle(.secondary)
-                        .padding(.horizontal, 8)
-                } else {
-                    Text("Loaded \(libraryService.tracks.count) tracks, \(libraryService.crates.count) crates, \(libraryService.smartCrates.count) smart crates")
-                        .font(.callout)
-                        .foregroundStyle(.secondary)
-                        .padding(.horizontal, 8)
-                }
+                SectionHeaderCard(
+                    title: "Tracks",
+                    description: "Browse every track in the library, filter by genre, and manage metadata or deletion actions from one place.",
+                    icon: "music.note.list"
+                )
 
                 VStack(alignment: .leading, spacing: 8) {
-                    HStack(spacing: 10) {
-                        crateStatTag(title: "Tracks", value: totalTrackCount, isActive: selectedTrackGenreFilter == nil) {
-                            selectedTrackGenreFilter = nil
-                        }
-                        crateStatTag(title: "Artists", value: totalArtistCount)
-                        crateStatTag(title: "Genres", value: totalGenreCount)
-                        Spacer(minLength: 0)
+                    if let loadErrorMessage {
+                        Text("Library load failed: \(loadErrorMessage)")
+                            .font(.callout)
+                            .foregroundStyle(.red)
+                            .padding(.horizontal, 8)
+                            .padding(.top, 8)
+                    } else if libraryService.tracks.isEmpty {
+                        Text("No tracks loaded")
+                            .font(.callout)
+                            .foregroundStyle(.secondary)
+                            .padding(.horizontal, 8)
+                    } else {
+                        Text("Loaded \(libraryService.tracks.count) tracks, \(libraryService.crates.count) crates, \(libraryService.smartCrates.count) smart crates")
+                            .font(.callout)
+                            .foregroundStyle(.secondary)
+                            .padding(.horizontal, 8)
                     }
 
-                    if !trackGenres.isEmpty {
-                        ScrollView(.horizontal, showsIndicators: false) {
-                            HStack(spacing: 6) {
-                                Button("All") {
-                                    selectedTrackGenreFilter = nil
-                                }
-                                .buttonStyle(.plain)
-                                .padding(.horizontal, 10)
-                                .padding(.vertical, 4)
-                                .background(
-                                    Capsule().fill(selectedTrackGenreFilter == nil ? Color.accentColor.opacity(0.92) : Color(nsColor: .windowBackgroundColor))
-                                )
-                                .overlay(
-                                    Capsule().stroke(selectedTrackGenreFilter == nil ? Color.accentColor : Color.secondary.opacity(0.25), lineWidth: 1)
-                                )
-                                .foregroundStyle(selectedTrackGenreFilter == nil ? .white : .primary)
+                    VStack(alignment: .leading, spacing: 8) {
+                        HStack(spacing: 10) {
+                            crateStatTag(title: "Tracks", value: totalTrackCount, isActive: selectedTrackGenreFilter == nil) {
+                                selectedTrackGenreFilter = nil
+                            }
+                            crateStatTag(title: "Artists", value: totalArtistCount)
+                            crateStatTag(title: "Genres", value: totalGenreCount)
+                            Spacer(minLength: 0)
+                        }
 
-                                ForEach(trackGenres, id: \.self) { genre in
-                                    Button(genre) {
-                                        selectedTrackGenreFilter = selectedTrackGenreFilter == genre ? nil : genre
+                        if !trackGenres.isEmpty {
+                            ScrollView(.horizontal, showsIndicators: false) {
+                                HStack(spacing: 6) {
+                                    Button("All") {
+                                        selectedTrackGenreFilter = nil
                                     }
                                     .buttonStyle(.plain)
                                     .padding(.horizontal, 10)
                                     .padding(.vertical, 4)
                                     .background(
-                                        Capsule().fill(selectedTrackGenreFilter == genre ? Color.accentColor.opacity(0.92) : Color(nsColor: .windowBackgroundColor))
+                                        Capsule().fill(selectedTrackGenreFilter == nil ? Color.accentColor.opacity(0.92) : Color(nsColor: .windowBackgroundColor))
                                     )
                                     .overlay(
-                                        Capsule().stroke(selectedTrackGenreFilter == genre ? Color.accentColor : Color.secondary.opacity(0.25), lineWidth: 1)
+                                        Capsule().stroke(selectedTrackGenreFilter == nil ? Color.accentColor : Color.secondary.opacity(0.25), lineWidth: 1)
                                     )
-                                    .foregroundStyle(selectedTrackGenreFilter == genre ? .white : .primary)
+                                    .foregroundStyle(selectedTrackGenreFilter == nil ? .white : .primary)
+
+                                    ForEach(trackGenres, id: \.self) { genre in
+                                        Button(genre) {
+                                            selectedTrackGenreFilter = selectedTrackGenreFilter == genre ? nil : genre
+                                        }
+                                        .buttonStyle(.plain)
+                                        .padding(.horizontal, 10)
+                                        .padding(.vertical, 4)
+                                        .background(
+                                            Capsule().fill(selectedTrackGenreFilter == genre ? Color.accentColor.opacity(0.92) : Color(nsColor: .windowBackgroundColor))
+                                        )
+                                        .overlay(
+                                            Capsule().stroke(selectedTrackGenreFilter == genre ? Color.accentColor : Color.secondary.opacity(0.25), lineWidth: 1)
+                                        )
+                                        .foregroundStyle(selectedTrackGenreFilter == genre ? .white : .primary)
+                                    }
                                 }
+                                .padding(.horizontal, 8)
                             }
-                            .padding(.horizontal, 8)
                         }
-                    }
 
-                    HStack {
-                        Button("Lookup ID3 Online") {
-                            metadataLookupTrack = selectedTracksForActions.first
+                        HStack {
+                            Button("Lookup ID3 Online") {
+                                metadataLookupTrack = selectedTracksForActions.first
+                            }
+                            .disabled(selectedTracksForActions.count != 1)
+
+                            Button("Delete From Library") {
+                                pendingTrackDeleteSelection = selectedTracksForActions
+                                performOrConfirmQuickTrackDelete(.fromLibrary)
+                            }
+                            .disabled(selectedTracksForActions.isEmpty)
+
+                            Button("Delete From Computer") {
+                                pendingTrackDeleteSelection = selectedTracksForActions
+                                performOrConfirmQuickTrackDelete(.fromComputer)
+                            }
+                            .disabled(selectedTracksForActions.isEmpty)
+
+                            Toggle("Confirm Deletes", isOn: $confirmDeleteActions)
+                                .toggleStyle(.switch)
+                                .controlSize(.small)
+                                .help("When off, top delete buttons execute immediately.")
+                            Spacer()
                         }
-                        .disabled(selectedTracksForActions.count != 1)
-
-                        Button("Delete From Library") {
-                            pendingTrackDeleteSelection = selectedTracksForActions
-                            performOrConfirmQuickTrackDelete(.fromLibrary)
-                        }
-                        .disabled(selectedTracksForActions.isEmpty)
-
-                        Button("Delete From Computer") {
-                            pendingTrackDeleteSelection = selectedTracksForActions
-                            performOrConfirmQuickTrackDelete(.fromComputer)
-                        }
-                        .disabled(selectedTracksForActions.isEmpty)
-
-                        Toggle("Confirm Deletes", isOn: $confirmDeleteActions)
-                            .toggleStyle(.switch)
-                            .controlSize(.small)
-                            .help("When off, top delete buttons execute immediately.")
-                        Spacer()
+                        .padding(.horizontal, 8)
                     }
                     .padding(.horizontal, 8)
-                }
-                .padding(.horizontal, 8)
-                .padding(.vertical, 8)
-                .background(Color(nsColor: .controlBackgroundColor).opacity(0.45))
+                    .padding(.vertical, 8)
+                    .background(Color(nsColor: .controlBackgroundColor).opacity(0.45))
+                    .glowCardStyle(radius: 8, opacity: 0.05)
 
-                TrackTableView(
-                    tracks: filteredLibraryTracks,
-                    numberingMode: .listOrder,
-                    onDeleteRequested: { selected in
-                        pendingTrackDeleteSelection = selected
-                        showTrackDeleteDialog = true
-                    },
-                    onMetadataEditRequested: { track, metadata in
-                        applyTrackMetadataEdit(track: track, metadata: metadata)
-                    },
-                    onSelectionChanged: { selected in
-                        selectedTracksForActions = selected
-                    }
-                )
+                    TrackTableView(
+                        tracks: filteredLibraryTracks,
+                        numberingMode: .listOrder,
+                        onDeleteRequested: { selected in
+                            pendingTrackDeleteSelection = selected
+                            showTrackDeleteDialog = true
+                        },
+                        onMetadataEditRequested: { track, metadata in
+                            applyTrackMetadataEdit(track: track, metadata: metadata)
+                        },
+                        onSelectionChanged: { selected in
+                            selectedTracksForActions = selected
+                        }
+                    )
+                }
             }
         case .tags:
             TagsBulkEditView(onApplyMetadata: { track, metadata in
@@ -448,7 +427,37 @@ struct ContentView: View {
         case .libraryConsolidation:
             LibraryConsolidationView(onLibraryChanged: reloadLibrary)
         case .crates:
-            EmptyView()
+            VStack(alignment: .leading, spacing: 12) {
+                SectionHeaderCard(
+                    title: "Crates",
+                    description: "Review nested crates, inspect the tree structure, and manage hidden or smart playlists from one place.",
+                    icon: "square.stack"
+                )
+
+                cratesStatsHeader
+
+                HStack(spacing: 12) {
+                    CrateTreeView(
+                        crateHierarchy: crateHierarchy,
+                        smartCrateHierarchy: smartCrateHierarchy,
+                        selectedNode: $selectedCrateNode,
+                        listFilterMode: crateListFilterMode,
+                        onCratesChanged: reloadLibrary
+                    )
+                    .frame(minWidth: middlePaneWidth, idealWidth: middlePaneWidth, maxWidth: middlePaneWidth)
+
+                    Group {
+                        if let node = selectedCrateNode {
+                            CrateDetailView(node: node, filterMode: crateListFilterMode, onCratesChanged: reloadLibrary)
+                        } else {
+                            Text("Select an item")
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+                    .frame(minWidth: 320, maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+                }
+            }
+            .padding(.horizontal, 8)
         case nil:
             Text("Select a section")
                 .foregroundStyle(.secondary)

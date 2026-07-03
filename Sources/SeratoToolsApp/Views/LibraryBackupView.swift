@@ -107,6 +107,7 @@ struct LibraryBackupView: View {
             RoundedRectangle(cornerRadius: 14)
                 .stroke(Color.accentColor.opacity(0.22), lineWidth: 1)
         )
+        .glowCardStyle(radius: 10, opacity: 0.08)
     }
 
     private var statsCard: some View {
@@ -142,6 +143,7 @@ struct LibraryBackupView: View {
                 .stroke(Color.accentColor.opacity(0.18), lineWidth: 1.2)
         )
         .shadow(color: Color.black.opacity(0.08), radius: 10, x: 0, y: 4)
+        .glowCardStyle(radius: 10, opacity: 0.08)
     }
 
     private func statTag(title: String, value: String) -> some View {
@@ -164,6 +166,7 @@ struct LibraryBackupView: View {
             RoundedRectangle(cornerRadius: 12)
                 .stroke(Color.secondary.opacity(0.28), lineWidth: 1)
         )
+        .glowCardStyle(radius: 8, opacity: 0.05)
     }
 
     private var destinationCard: some View {
@@ -185,6 +188,7 @@ struct LibraryBackupView: View {
         }
         .padding(20)
         .background(RoundedRectangle(cornerRadius: 12).fill(Color(nsColor: .controlBackgroundColor).opacity(0.55)))
+        .glowCardStyle(radius: 8, opacity: 0.05)
     }
 
     private var modeCard: some View {
@@ -220,6 +224,7 @@ struct LibraryBackupView: View {
         }
         .padding(16)
         .background(RoundedRectangle(cornerRadius: 12).fill(Color(nsColor: .controlBackgroundColor).opacity(0.55)))
+        .glowCardStyle(radius: 8, opacity: 0.05)
     }
 
     private var actionCard: some View {
@@ -248,6 +253,7 @@ struct LibraryBackupView: View {
         }
         .padding(16)
         .background(RoundedRectangle(cornerRadius: 12).fill(Color(nsColor: .controlBackgroundColor).opacity(0.55)))
+        .glowCardStyle(radius: 8, opacity: 0.05)
     }
 
     private var summaryText: String {

@@ -123,6 +123,7 @@ struct LibraryConsolidationView: View {
             RoundedRectangle(cornerRadius: 14)
                 .stroke(Color.accentColor.opacity(0.22), lineWidth: 1)
         )
+        .glowCardStyle(radius: 10, opacity: 0.08)
     }
 
     private var destinationCard: some View {
@@ -166,6 +167,7 @@ struct LibraryConsolidationView: View {
         }
         .padding(20)
         .background(RoundedRectangle(cornerRadius: 12).fill(Color(nsColor: .controlBackgroundColor).opacity(0.55)))
+        .glowCardStyle(radius: 8, opacity: 0.05)
     }
 
     private var summaryRow: some View {
@@ -185,6 +187,7 @@ struct LibraryConsolidationView: View {
                 summaryTag(title: "Copy Space Needed", value: formatGB(copyModeRequiredBytes))
             }
         }
+        .glowCardStyle(radius: 8, opacity: 0.05)
     }
 
     private var destinationSpaceCard: some View {
@@ -205,6 +208,7 @@ struct LibraryConsolidationView: View {
         }
         .padding(16)
         .background(RoundedRectangle(cornerRadius: 12).fill(Color(nsColor: .controlBackgroundColor).opacity(0.55)))
+        .glowCardStyle(radius: 8, opacity: 0.05)
     }
 
     private var sourceGroupsCard: some View {
@@ -288,6 +292,7 @@ struct LibraryConsolidationView: View {
         }
         .padding(16)
         .background(RoundedRectangle(cornerRadius: 12).fill(Color(nsColor: .controlBackgroundColor).opacity(0.55)))
+        .glowCardStyle(radius: 8, opacity: 0.05)
     }
 
     private func summaryTag(title: String, value: String, accent: Bool = false) -> some View {
@@ -310,6 +315,7 @@ struct LibraryConsolidationView: View {
             RoundedRectangle(cornerRadius: 10)
                 .stroke(accent ? Color.accentColor : Color.secondary.opacity(0.25), lineWidth: 1)
         )
+        .glowCardStyle(radius: 8, opacity: 0.05)
     }
 
     private func chooseDestinationFolder() {
