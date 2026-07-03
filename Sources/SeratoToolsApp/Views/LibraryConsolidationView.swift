@@ -16,6 +16,7 @@ struct LibraryConsolidationView: View {
     @State private var destinationAvailableBytes: Int64?
     @State private var isRefreshingPreview = false
     @State private var previewRefreshTask: Task<Void, Never>?
+    @State private var selectedSourceGroupIDs: Set<String> = []
 
     var body: some View {
         ScrollView {
@@ -57,6 +58,33 @@ struct LibraryConsolidationView: View {
             return defaultDestinationFolder
         }
         return URL(fileURLWithPath: trimmed)
+    }
+
+    private var activePreview: LibraryConsolidationPreview? {
+        guard let preview else { return nil }
+        return LibraryConsolidationService.filteredPreview(preview, includingSourceGroupIDs: selectedSourceGroupIDs)
+    }
+
+    private enum SelectionState {
+        case none
+        case partial
+        case all
+    }
+
+    private var sourceSelectionState: SelectionState {
+        guard let preview, !preview.sourceGroups.isEmpty else {
+            return .none
+        }
+
+        let allIDs = Set(preview.sourceGroups.map(\.id))
+        let selectedCount = selectedSourceGroupIDs.intersection(allIDs).count
+        if selectedCount == 0 {
+            return .none
+        }
+        if selectedCount == allIDs.count {
+            return .all
+        }
+        return .partial
     }
 
     private var heroCard: some View {
@@ -146,14 +174,14 @@ struct LibraryConsolidationView: View {
                 .font(.title3.weight(.semibold))
 
             HStack(spacing: 10) {
-                summaryTag(title: "Source Locations", value: "\(preview?.sourceGroups.count ?? 0)", accent: true)
-                summaryTag(title: "Tracks To Process", value: "\(preview?.totalMoves ?? 0)", accent: true)
-                summaryTag(title: transferMode == .copy ? "Will Copy" : "Will Move", value: formatGB(preview?.queuedTransferBytes ?? 0), accent: true)
+                summaryTag(title: "Source Locations", value: "\(activePreview?.sourceGroups.count ?? 0)", accent: true)
+                summaryTag(title: "Tracks To Process", value: "\(activePreview?.totalMoves ?? 0)", accent: true)
+                summaryTag(title: transferMode == .copy ? "Will Copy" : "Will Move", value: formatGB(activePreview?.queuedTransferBytes ?? 0), accent: true)
             }
 
             HStack(spacing: 10) {
-                summaryTag(title: "Library Size", value: formatGB(preview?.totalExistingBytes ?? 0))
-                summaryTag(title: "Already Centralized", value: formatGB(preview?.alreadyConsolidatedBytes ?? 0))
+                summaryTag(title: "Library Size", value: formatGB(activePreview?.totalExistingBytes ?? 0))
+                summaryTag(title: "Already Centralized", value: formatGB(activePreview?.alreadyConsolidatedBytes ?? 0))
                 summaryTag(title: "Copy Space Needed", value: formatGB(copyModeRequiredBytes))
             }
         }
@@ -185,12 +213,40 @@ struct LibraryConsolidationView: View {
                 .font(.title3.weight(.semibold))
 
             if let preview, !preview.sourceGroups.isEmpty {
+                HStack(spacing: 12) {
+                    Button {
+                        toggleSelectAllSources()
+                    } label: {
+                        HStack(spacing: 6) {
+                            Image(systemName: selectAllIconName)
+                            Text("Select All Sources")
+                        }
+                    }
+                    .buttonStyle(.plain)
+
+                    Text("\(selectedSourceGroupIDs.count) selected")
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                    Spacer(minLength: 0)
+                }
+
                 VStack(spacing: 4) {
                     ForEach(preview.sourceGroups) { group in
                         VStack(alignment: .leading, spacing: 3) {
                             HStack(alignment: .top, spacing: 12) {
-                                Text(group.title)
-                                    .font(.system(size: 18, weight: .semibold, design: .default))
+                                Button {
+                                    toggleSourceSelection(group.id)
+                                } label: {
+                                    HStack(spacing: 8) {
+                                        Image(systemName: selectedSourceGroupIDs.contains(group.id) ? "checkmark.circle.fill" : "circle")
+                                            .foregroundStyle(selectedSourceGroupIDs.contains(group.id) ? Color.accentColor : Color.secondary)
+                                        Text(group.title)
+                                            .font(.system(size: 18, weight: .semibold, design: .default))
+                                            .foregroundStyle(.primary)
+                                    }
+                                }
+                                .buttonStyle(.plain)
+
                                 Spacer(minLength: 0)
                                 VStack(alignment: .trailing, spacing: 2) {
                                     Text("\(group.trackCount) tracks")
@@ -275,14 +331,14 @@ struct LibraryConsolidationView: View {
     }
 
     private var shouldDisableConsolidationAction: Bool {
-        if isRunning || (preview?.moves.isEmpty ?? true) {
+        if isRunning || (activePreview?.moves.isEmpty ?? true) {
             return true
         }
         return isCopyBlockedByCapacity
     }
 
     private var copyModeRequiredBytes: Int64 {
-        preview?.queuedTransferBytes ?? 0
+        activePreview?.queuedTransferBytes ?? 0
     }
 
     private var hasEnoughSpaceForCopy: Bool {
@@ -355,7 +411,54 @@ struct LibraryConsolidationView: View {
 
             guard !Task.isCancelled else { return }
             preview = computedPreview
+            selectedSourceGroupIDs = synchronizedSelection(for: computedPreview)
             isRefreshingPreview = false
+        }
+    }
+
+    private func synchronizedSelection(for preview: LibraryConsolidationPreview) -> Set<String> {
+        let available = Set(preview.sourceGroups.map(\ .id))
+        guard !available.isEmpty else { return [] }
+
+        if selectedSourceGroupIDs.isEmpty {
+            return available
+        }
+
+        let retained = selectedSourceGroupIDs.intersection(available)
+        return retained.isEmpty ? available : retained
+    }
+
+    private func toggleSourceSelection(_ sourceGroupID: String) {
+        if selectedSourceGroupIDs.contains(sourceGroupID) {
+            selectedSourceGroupIDs.remove(sourceGroupID)
+        } else {
+            selectedSourceGroupIDs.insert(sourceGroupID)
+        }
+    }
+
+    private var selectAllIconName: String {
+        switch sourceSelectionState {
+        case .all:
+            return "checkmark.square.fill"
+        case .partial:
+            return "minus.square.fill"
+        case .none:
+            return "square"
+        }
+    }
+
+    private func toggleSelectAllSources() {
+        guard let preview else {
+            selectedSourceGroupIDs = []
+            return
+        }
+
+        let allIDs = Set(preview.sourceGroups.map(\.id))
+        switch sourceSelectionState {
+        case .all:
+            selectedSourceGroupIDs = []
+        case .partial, .none:
+            selectedSourceGroupIDs = allIDs
         }
     }
 
@@ -419,8 +522,8 @@ struct LibraryConsolidationView: View {
     }
 
     private func runConsolidation() {
-        guard let preview else {
-            refreshPreview()
+        guard let activePreview else {
+            schedulePreviewRefresh()
             return
         }
 
@@ -431,7 +534,7 @@ struct LibraryConsolidationView: View {
 
         do {
             let result = try LibraryConsolidationService.consolidate(
-                preview: preview,
+                preview: activePreview,
                 mode: transferMode,
                 crates: libraryService.crates,
                 rootDirectory: libraryService.rootDirectory,

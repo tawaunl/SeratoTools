@@ -14,6 +14,7 @@ public struct LibraryConsolidationPreview: Sendable {
         public let originalStoredPath: String
         public let sourceURL: URL
         public let destinationURL: URL
+        public let sourceGroupID: String
         public let sourceGroupTitle: String
         public let displayName: String
     }
@@ -126,6 +127,9 @@ public enum LibraryConsolidationService {
             }
 
             let descriptor = sourceDescriptor(for: sourceURL, homeDirectory: homeDirectory)
+            let groupDirectory = sourceGroupDirectory(for: sourceURL, baseURL: descriptor.baseURL)
+            let groupKey = groupDirectory.path
+
             let relativePath = relativePath(from: sourceURL, baseURL: descriptor.baseURL)
             var destinationURL = destinationRoot
                 .appendingPathComponent(descriptor.destinationPrefix, isDirectory: true)
@@ -143,13 +147,12 @@ public enum LibraryConsolidationService {
                     originalStoredPath: track.seratoStoredPath,
                     sourceURL: sourceURL,
                     destinationURL: destinationURL,
+                    sourceGroupID: groupKey,
                     sourceGroupTitle: descriptor.title,
                     displayName: track.title.isEmpty ? sourceURL.lastPathComponent : track.title
                 )
             )
 
-            let groupDirectory = sourceGroupDirectory(for: sourceURL, baseURL: descriptor.baseURL)
-            let groupKey = groupDirectory.path
             groupCounts[groupKey, default: 0] += 1
             groupTitles[groupKey] = groupDirectory.lastPathComponent.isEmpty ? descriptor.title : groupDirectory.lastPathComponent
             groupPaths[groupKey] = groupDirectory.path
@@ -177,6 +180,43 @@ public enum LibraryConsolidationService {
             totalExistingBytes: totalExistingBytes,
             queuedTransferBytes: queuedTransferBytes,
             alreadyConsolidatedBytes: alreadyConsolidatedBytes
+        )
+    }
+
+    public static func filteredPreview(
+        _ preview: LibraryConsolidationPreview,
+        includingSourceGroupIDs selectedSourceGroupIDs: Set<String>
+    ) -> LibraryConsolidationPreview {
+        guard !selectedSourceGroupIDs.isEmpty else {
+            return LibraryConsolidationPreview(
+                destinationFolderURL: preview.destinationFolderURL,
+                moves: [],
+                sourceGroups: [],
+                skippedMissingCount: preview.skippedMissingCount,
+                skippedAlreadyConsolidatedCount: preview.skippedAlreadyConsolidatedCount,
+                skippedDuplicatePathCount: preview.skippedDuplicatePathCount,
+                totalExistingBytes: preview.totalExistingBytes,
+                queuedTransferBytes: 0,
+                alreadyConsolidatedBytes: preview.alreadyConsolidatedBytes
+            )
+        }
+
+        let filteredMoves = preview.moves.filter { selectedSourceGroupIDs.contains($0.sourceGroupID) }
+        let filteredGroups = preview.sourceGroups.filter { selectedSourceGroupIDs.contains($0.id) }
+        let filteredQueuedBytes = filteredGroups.reduce(Int64(0)) { partial, group in
+            partial + group.totalBytes
+        }
+
+        return LibraryConsolidationPreview(
+            destinationFolderURL: preview.destinationFolderURL,
+            moves: filteredMoves,
+            sourceGroups: filteredGroups,
+            skippedMissingCount: preview.skippedMissingCount,
+            skippedAlreadyConsolidatedCount: preview.skippedAlreadyConsolidatedCount,
+            skippedDuplicatePathCount: preview.skippedDuplicatePathCount,
+            totalExistingBytes: preview.totalExistingBytes,
+            queuedTransferBytes: filteredQueuedBytes,
+            alreadyConsolidatedBytes: preview.alreadyConsolidatedBytes
         )
     }
 
