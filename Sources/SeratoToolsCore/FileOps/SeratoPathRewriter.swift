@@ -16,24 +16,35 @@ public enum SeratoPathRewriter {
     }
 
     @discardableResult
-    public static func rewritePath(
-        _ oldPath: String,
-        to newPath: String,
+    public static func rewritePaths(
+        _ rewrites: [String: String],
         in databaseFileURL: URL
-    ) throws -> Bool {
+    ) throws -> Int {
         guard !SeratoProcessGuard.isSeratoRunning else {
             throw RewriteError.seratoIsRunning
+        }
+        guard !rewrites.isEmpty else {
+            return 0
         }
 
         try SeratoBackupBeforeWrite.snapshot(of: databaseFileURL)
 
         let data = try Data(contentsOf: databaseFileURL)
-        let (newData, didRewrite) = SeratoDatabaseWriter.rewritingPath(oldPath, to: newPath, in: data)
-        guard didRewrite else {
+        let rewritten = SeratoDatabaseWriter.rewritingPaths(rewrites, in: data)
+        guard rewritten.rewrittenCount > 0 else {
             throw RewriteError.trackNotFound
         }
 
-        try AtomicFileWriter.write(newData, to: databaseFileURL)
-        return true
+        try AtomicFileWriter.write(rewritten.data, to: databaseFileURL)
+        return rewritten.rewrittenCount
+    }
+
+    @discardableResult
+    public static func rewritePath(
+        _ oldPath: String,
+        to newPath: String,
+        in databaseFileURL: URL
+    ) throws -> Bool {
+        try rewritePaths([oldPath: newPath], in: databaseFileURL) > 0
     }
 }

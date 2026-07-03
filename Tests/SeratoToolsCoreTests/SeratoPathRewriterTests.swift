@@ -2,6 +2,9 @@ import Testing
 import Foundation
 @testable import SeratoToolsCore
 
+@Suite(.serialized)
+struct SeratoPathRewriterTests {
+
 private func makeScratchDatabaseCopy() throws -> URL {
     let fixture = Bundle.module
         .url(forResource: "Fixtures/RealLibrarySample", withExtension: nil)!
@@ -57,4 +60,6 @@ private func makeScratchDatabaseCopy() throws -> URL {
     #expect(throws: SeratoPathRewriter.RewriteError.trackNotFound) {
         try SeratoPathRewriter.rewritePath("Music/does-not-exist.mp3", to: "Music/other.mp3", in: scratchFile)
     }
+}
+
 }

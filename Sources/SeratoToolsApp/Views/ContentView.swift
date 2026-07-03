@@ -7,6 +7,7 @@ enum SidebarSection: Hashable {
     case crates
     case tags
     case missingTracks
+    case libraryConsolidation
 }
 
 struct ContentView: View {
@@ -295,6 +296,7 @@ struct ContentView: View {
             Label("Crates", systemImage: "square.stack").tag(SidebarSection.crates)
             Label("Tags", systemImage: "tag").tag(SidebarSection.tags)
             Label("Missing Tracks", systemImage: "exclamationmark.triangle").tag(SidebarSection.missingTracks)
+            Label("Library Consolidation", systemImage: "arrow.triangle.merge").tag(SidebarSection.libraryConsolidation)
         }
         .frame(minWidth: sidebarWidth, idealWidth: sidebarWidth, maxWidth: sidebarWidth)
     }
@@ -439,6 +441,8 @@ struct ContentView: View {
             })
         case .missingTracks:
             MissingTracksView()
+        case .libraryConsolidation:
+            LibraryConsolidationView(onLibraryChanged: reloadLibrary)
         case .crates:
             EmptyView()
         case nil:
