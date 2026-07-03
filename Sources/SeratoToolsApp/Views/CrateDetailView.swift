@@ -22,6 +22,7 @@ struct CrateDetailView: View {
     private static let confirmDeleteActionsDefaultsKey = "SeratoToolsConfirmTrackDeleteActions"
 
     let node: CrateNode
+    let filterMode: CrateListFilterMode
     let onCratesChanged: () -> Void
     @EnvironmentObject private var libraryService: LibraryService
 
@@ -31,6 +32,7 @@ struct CrateDetailView: View {
     @State private var pendingDeleteCrate: Crate?
     @State private var showTrackDeleteDialog = false
     @State private var selectedTracksForActions: [Track] = []
+    @State private var metadataLookupTrack: Track?
     @State private var quickDeleteAction: QuickDeleteAction?
     @State private var showQuickDeleteConfirmation = false
     @AppStorage(Self.confirmDeleteActionsDefaultsKey) private var confirmDeleteActions = true
@@ -58,6 +60,11 @@ struct CrateDetailView: View {
                             Button("Manage Tracks") {
                                 isManagingTracks = true
                             }
+                            Button("Lookup ID3 Online") {
+                                metadataLookupTrack = selectedTracksForActions.first
+                            }
+                            .disabled(selectedTracksForActions.count != 1)
+
                             Button("Delete From Crate") {
                                 pendingDeleteTracks = selectedTracksForActions
                                 pendingDeleteCrate = crate
@@ -161,6 +168,11 @@ struct CrateDetailView: View {
                 CrateTrackManagerView(crate: crate, libraryTracks: libraryService.tracks) {
                     onCratesChanged()
                 }
+            }
+        }
+        .sheet(item: $metadataLookupTrack) { track in
+            TrackMetadataEditorSheet(track: track) { metadata in
+                try saveTrackMetadataEdit(track: track, metadata: metadata)
             }
         }
         .onChange(of: node.id) {
@@ -328,15 +340,19 @@ struct CrateDetailView: View {
 
     private func applyTrackMetadataEdit(track: Track, metadata: SeratoTrackMetadataUpdate) {
         do {
-            try SeratoTrackMetadataEditor.update(
-                track: track,
-                metadata: metadata,
-                databaseFileURL: libraryService.databaseFile
-            )
-            onCratesChanged()
+            try saveTrackMetadataEdit(track: track, metadata: metadata)
         } catch {
             trackEditErrorMessage = error.localizedDescription
         }
+    }
+
+    private func saveTrackMetadataEdit(track: Track, metadata: SeratoTrackMetadataUpdate) throws {
+        try SeratoTrackMetadataEditor.update(
+            track: track,
+            metadata: metadata,
+            databaseFileURL: libraryService.databaseFile
+        )
+        onCratesChanged()
     }
 
     private func statTag(title: String, value: Int, isActive: Bool = false, action: (() -> Void)? = nil) -> some View {
@@ -392,7 +408,15 @@ struct CrateDetailView: View {
         }
 
         let pathPrefix = node.pathComponents
-        let descendantCrates = (libraryService.crates + libraryService.smartCrates)
+        let sourceCrates: [Crate]
+        switch filterMode {
+        case .smartOnly:
+            sourceCrates = libraryService.smartCrates
+        case .all, .hiddenOnly:
+            sourceCrates = libraryService.crates + libraryService.smartCrates
+        }
+
+        let descendantCrates = sourceCrates
             .filter { $0.pathComponents.starts(with: pathPrefix) }
 
         var seen = Set<String>()
