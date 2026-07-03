@@ -4,6 +4,7 @@ import SeratoToolsCore
 
 enum SidebarSection: Hashable {
     case tracks
+    case addMusic
     case crates
     case tags
     case missingTracks
@@ -293,6 +294,7 @@ struct ContentView: View {
     private var sidebar: some View {
         List(selection: $selectedSection) {
             Label("Tracks", systemImage: "music.note.list").tag(SidebarSection.tracks)
+            Label("Add Music", systemImage: "plus.square.on.square").tag(SidebarSection.addMusic)
             Label("Crates", systemImage: "square.stack").tag(SidebarSection.crates)
             Label("Tags", systemImage: "tag").tag(SidebarSection.tags)
             Label("Missing Tracks", systemImage: "exclamationmark.triangle").tag(SidebarSection.missingTracks)
@@ -435,6 +437,8 @@ struct ContentView: View {
                     }
                 )
             }
+        case .addMusic:
+            AddMusicView(onLibraryChanged: reloadLibrary)
         case .tags:
             TagsBulkEditView(onApplyMetadata: { track, metadata in
                 try saveTrackMetadataEdit(track: track, metadata: metadata)
