@@ -3,6 +3,14 @@ import AppKit
 import SeratoToolsCore
 
 struct YouTubeRipView: View {
+    private static let formatDefaultsKey = "YouTubeRipSelectedFormat"
+    private static let qualityDefaultsKey = "YouTubeRipSelectedQuality"
+    private static let bitrateDefaultsKey = "YouTubeRipSelectedBitrate"
+    private static let crateAssignmentDefaultsKey = "YouTubeRipCrateAssignment"
+    private static let destinationDefaultsKey = "YouTubeRipDestinationPath"
+    private static let cratePrefixDefaultsKey = "YouTubeRipCratePrefix"
+    private static let autoLookupDefaultsKey = "YouTubeRipAutoLookupAfterLoad"
+
     private enum SeratoWriteOutcome {
         case inserted
         case updated
@@ -81,13 +89,14 @@ struct YouTubeRipView: View {
     let onLibraryChanged: () -> Void
 
     @State private var urlText = ""
-    @State private var destinationPath = ""
-    @State private var cratePrefix = "New Music"
+    @AppStorage(Self.destinationDefaultsKey) private var destinationPath = ""
+    @AppStorage(Self.cratePrefixDefaultsKey) private var cratePrefix = "New Music"
+    @AppStorage(Self.crateAssignmentDefaultsKey) private var crateAssignmentModeRaw = CrateAssignmentMode.dated.rawValue
     @State private var crateAssignmentMode: CrateAssignmentMode = .dated
     @State private var selectedExistingCrateID: UUID?
-    @State private var selectedFormat: YouTubeAudioImportService.AudioFormat = .mp3
-    @State private var selectedQuality: YouTubeAudioImportService.AudioQuality = .best
-    @State private var selectedBitrate: BitrateSelection = .auto
+    @AppStorage(Self.formatDefaultsKey) private var selectedFormatRaw = YouTubeAudioImportService.AudioFormat.mp3.rawValue
+    @AppStorage(Self.qualityDefaultsKey) private var selectedQualityRaw = YouTubeAudioImportService.AudioQuality.best.rawValue
+    @AppStorage(Self.bitrateDefaultsKey) private var selectedBitrateRaw = BitrateSelection.kbps320.rawValue
 
     @State private var loadedInfo: YouTubeAudioImportService.VideoInfo?
     @State private var isLoadingInfo = false
@@ -107,6 +116,11 @@ struct YouTubeRipView: View {
     @State private var id3Key = ""
     @State private var id3BPM = ""
     @State private var id3Year = ""
+    @AppStorage(Self.autoLookupDefaultsKey) private var autoLookupAfterLoadInfo = true
+    @State private var lookupSourceSelection: OnlineTrackMetadataLookupService.SourceSelection = .all
+    @State private var isSearchingLookup = false
+    @State private var lookupErrorMessage: String?
+    @State private var lookupResults: [OnlineTrackMetadataCandidate] = []
 
     private var destinationFolderURL: URL {
         let trimmed = destinationPath.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -130,6 +144,34 @@ struct YouTubeRipView: View {
 
     private var canDownload: Bool {
         !isDownloading && !isLoadingInfo && parsedVideoURL != nil && dependencyReady && isCrateSelectionValid
+    }
+
+    private var selectedFormat: YouTubeAudioImportService.AudioFormat {
+        YouTubeAudioImportService.AudioFormat(rawValue: selectedFormatRaw) ?? .mp3
+    }
+
+    private var selectedQuality: YouTubeAudioImportService.AudioQuality {
+        YouTubeAudioImportService.AudioQuality(rawValue: selectedQualityRaw) ?? .best
+    }
+
+    private var selectedBitrate: BitrateSelection {
+        BitrateSelection(rawValue: selectedBitrateRaw) ?? .kbps320
+    }
+
+    private var selectedFormatBinding: Binding<YouTubeAudioImportService.AudioFormat> {
+        Binding(get: { selectedFormat }, set: { selectedFormatRaw = $0.rawValue })
+    }
+
+    private var selectedQualityBinding: Binding<YouTubeAudioImportService.AudioQuality> {
+        Binding(get: { selectedQuality }, set: { selectedQualityRaw = $0.rawValue })
+    }
+
+    private var selectedBitrateBinding: Binding<BitrateSelection> {
+        Binding(get: { selectedBitrate }, set: { selectedBitrateRaw = $0.rawValue })
+    }
+
+    private var crateAssignmentModeBinding: Binding<CrateAssignmentMode> {
+        Binding(get: { crateAssignmentMode }, set: { crateAssignmentMode = $0 })
     }
 
     private var supportsExplicitBitrate: Bool {
@@ -192,12 +234,16 @@ struct YouTubeRipView: View {
             if destinationPath.isEmpty {
                 destinationPath = defaultDestinationFolderURL.path
             }
+            crateAssignmentMode = CrateAssignmentMode(rawValue: crateAssignmentModeRaw) ?? .dated
             checkDependencies()
         }
         .onChange(of: selectedFormat) {
             if !supportsExplicitBitrate {
-                selectedBitrate = .auto
+                selectedBitrateRaw = BitrateSelection.auto.rawValue
             }
+        }
+        .onChange(of: crateAssignmentMode) {
+            crateAssignmentModeRaw = crateAssignmentMode.rawValue
         }
         .onChange(of: crateAssignmentMode) {
             guard crateAssignmentMode == .existing else { return }
@@ -336,14 +382,14 @@ struct YouTubeRipView: View {
                 .font(.title3.weight(.semibold))
 
             HStack(spacing: 10) {
-                Picker("Format", selection: $selectedFormat) {
+                Picker("Format", selection: selectedFormatBinding) {
                     ForEach(YouTubeAudioImportService.AudioFormat.allCases, id: \.self) { format in
                         Text(format.displayName).tag(format)
                     }
                 }
                 .frame(maxWidth: 180)
 
-                Picker("Quality", selection: $selectedQuality) {
+                Picker("Quality", selection: selectedQualityBinding) {
                     ForEach(YouTubeAudioImportService.AudioQuality.allCases, id: \.self) { quality in
                         Text(quality.displayName).tag(quality)
                     }
@@ -355,7 +401,7 @@ struct YouTubeRipView: View {
 
             if supportsExplicitBitrate {
                 HStack(spacing: 10) {
-                    Picker("Bitrate", selection: $selectedBitrate) {
+                    Picker("Bitrate", selection: selectedBitrateBinding) {
                         ForEach(BitrateSelection.allCases) { option in
                             Text(option.displayName).tag(option)
                         }
@@ -385,7 +431,7 @@ struct YouTubeRipView: View {
             }
 
             HStack(spacing: 10) {
-                Picker("Crate Assignment", selection: $crateAssignmentMode) {
+                Picker("Crate Assignment", selection: crateAssignmentModeBinding) {
                     ForEach(CrateAssignmentMode.allCases) { mode in
                         Text(mode.displayName).tag(mode)
                     }
@@ -457,6 +503,95 @@ struct YouTubeRipView: View {
             Text("MP3 ID3 Tags")
                 .font(.title3.weight(.semibold))
 
+            HStack(spacing: 10) {
+                Picker("Source", selection: $lookupSourceSelection) {
+                    ForEach(OnlineTrackMetadataLookupService.SourceSelection.allCases, id: \.self) { source in
+                        Text(source.displayName).tag(source)
+                    }
+                }
+                .pickerStyle(.menu)
+                .frame(maxWidth: 180)
+
+                Button("Lookup ID3 Online") {
+                    runID3Lookup()
+                }
+                .disabled(isSearchingLookup)
+
+                if isSearchingLookup {
+                    ProgressView()
+                        .controlSize(.small)
+                }
+
+                Spacer(minLength: 0)
+            }
+
+            Toggle("Auto Lookup after Load Info", isOn: $autoLookupAfterLoadInfo)
+                .toggleStyle(.switch)
+                .controlSize(.small)
+
+            if let lookupErrorMessage {
+                Text(lookupErrorMessage)
+                    .font(.footnote)
+                    .foregroundStyle(.red)
+            }
+
+            if !lookupResults.isEmpty {
+                VStack(alignment: .leading, spacing: 8) {
+                    Text("Lookup Results")
+                        .font(.subheadline.weight(.semibold))
+
+                    ScrollView {
+                        VStack(alignment: .leading, spacing: 8) {
+                            ForEach(lookupResults.prefix(8)) { candidate in
+                                VStack(alignment: .leading, spacing: 4) {
+                                    HStack(alignment: .top) {
+                                        VStack(alignment: .leading, spacing: 2) {
+                                            Text("\(candidate.source.displayName): \(candidate.title.isEmpty ? "(untitled)" : candidate.title)")
+                                                .font(.callout.weight(.semibold))
+                                            Text(summary(for: candidate))
+                                                .font(.footnote)
+                                                .foregroundStyle(.secondary)
+                                                .lineLimit(2)
+                                        }
+                                        Spacer(minLength: 0)
+                                        Button("Use All") {
+                                            applyLookupCandidate(candidate)
+                                        }
+                                        .controlSize(.small)
+                                    }
+
+                                    HStack(spacing: 6) {
+                                        if !candidate.title.isEmpty {
+                                            fieldApplyButton("Title") { id3Title = candidate.title }
+                                        }
+                                        if !candidate.artist.isEmpty {
+                                            fieldApplyButton("Artist") { id3Artist = candidate.artist }
+                                        }
+                                        if !candidate.album.isEmpty {
+                                            fieldApplyButton("Album") { id3Album = candidate.album }
+                                        }
+                                        if !candidate.genre.isEmpty {
+                                            fieldApplyButton("Genre") { id3Genre = candidate.genre }
+                                        }
+                                        if candidate.year != nil {
+                                            fieldApplyButton("Year") { id3Year = candidate.year.map(String.init) ?? "" }
+                                        }
+                                        if candidate.bpm != nil {
+                                            fieldApplyButton("BPM") { id3BPM = candidate.bpm.map { String(format: "%.0f", $0) } ?? "" }
+                                        }
+                                        if !candidate.comment.isEmpty {
+                                            fieldApplyButton("Comment") { id3Comment = candidate.comment }
+                                        }
+                                    }
+                                }
+                                .padding(.vertical, 2)
+                            }
+                        }
+                    }
+                    .frame(maxHeight: 160)
+                }
+            }
+
             fieldRow("Title", text: $id3Title)
             fieldRow("Artist", text: $id3Artist)
             fieldRow("Album", text: $id3Album)
@@ -507,6 +642,12 @@ struct YouTubeRipView: View {
         }
     }
 
+    private func fieldApplyButton(_ label: String, action: @escaping () -> Void) -> some View {
+        Button(label, action: action)
+            .buttonStyle(.bordered)
+            .controlSize(.small)
+    }
+
     private func chooseDestinationFolder() {
         let panel = NSOpenPanel()
         panel.canChooseFiles = false
@@ -547,7 +688,13 @@ struct YouTubeRipView: View {
                     } else {
                         id3Year = ""
                     }
+                    lookupResults = []
+                    lookupErrorMessage = nil
                     errorMessage = nil
+
+                    if autoLookupAfterLoadInfo {
+                        runID3Lookup()
+                    }
                 }
             } catch {
                 await MainActor.run {
@@ -582,7 +729,14 @@ struct YouTubeRipView: View {
         let selectedBitrateKbps = supportsExplicitBitrate ? selectedBitrate.kbps : nil
         let crateAssignmentMode = crateAssignmentMode
         let selectedExistingCrate = selectedExistingCrate
-        let metadata = buildMetadataForSave()
+        let loadedInfoSnapshot = loadedInfo
+        let baseMetadata = buildMetadataForSave(
+            fallbackTitle: loadedInfoSnapshot?.title,
+            fallbackArtist: loadedInfoSnapshot?.uploader,
+            fallbackAlbum: loadedInfoSnapshot?.channel,
+            fallbackComment: loadedInfoSnapshot?.webpageURL?.absoluteString
+        )
+        let metadataForDownload = baseMetadata
         let cratePrefix = normalizedCratePrefix
         let subcratesDirectory = libraryService.subcratesDirectory
         let rootDirectory = libraryService.rootDirectory
@@ -598,19 +752,25 @@ struct YouTubeRipView: View {
                             audioFormat: selectedFormat,
                             audioQuality: selectedQuality,
                             audioBitrateKbps: selectedBitrateKbps,
-                            metadata: metadata
+                            metadata: metadataForDownload
                         )
                     )
                 }.value
 
                 var seratoMetadataWarning: String?
                 var seratoWriteOutcome: SeratoWriteOutcome = .unchanged
+                var metadataForDatabaseWrite = baseMetadata
+
+                if metadataForDatabaseWrite.title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                    metadataForDatabaseWrite.title = result.title
+                }
+
                 do {
                     seratoWriteOutcome = try writeSeratoMetadataForDownloadedFile(
                         fileURL: result.outputFileURL,
                         rootDirectory: rootDirectory,
                         databaseFileURL: databaseFileURL,
-                        metadata: metadata
+                        metadata: metadataForDatabaseWrite
                     )
                 } catch {
                     seratoMetadataWarning = "Serato DB write failed: \(error.localizedDescription)"
@@ -689,13 +849,23 @@ struct YouTubeRipView: View {
         return trimmed.isEmpty ? "New Music" : trimmed
     }
 
-    private func buildMetadataForSave() -> SeratoTrackMetadataUpdate {
-        SeratoTrackMetadataUpdate(
-            title: id3Title,
-            artist: id3Artist,
-            album: id3Album,
+    private func buildMetadataForSave(
+        fallbackTitle: String?,
+        fallbackArtist: String?,
+        fallbackAlbum: String?,
+        fallbackComment: String?
+    ) -> SeratoTrackMetadataUpdate {
+        let resolvedTitle = resolvePreferredValue(id3Title, fallbackTitle)
+        let resolvedArtist = resolvePreferredValue(id3Artist, fallbackArtist)
+        let resolvedAlbum = resolvePreferredValue(id3Album, fallbackAlbum)
+        let resolvedComment = resolvePreferredValue(id3Comment, fallbackComment)
+
+        return SeratoTrackMetadataUpdate(
+            title: resolvedTitle,
+            artist: resolvedArtist,
+            album: resolvedAlbum,
             genre: id3Genre,
-            comment: id3Comment,
+            comment: resolvedComment,
             key: id3Key,
             bpm: Double(id3BPM.trimmingCharacters(in: .whitespacesAndNewlines)),
             year: Int(id3Year.trimmingCharacters(in: .whitespacesAndNewlines))
@@ -775,6 +945,79 @@ struct YouTubeRipView: View {
         id3Key = ""
         id3BPM = ""
         id3Year = ""
+        lookupResults = []
+        lookupErrorMessage = nil
+    }
+
+    private func runID3Lookup() {
+        isSearchingLookup = true
+        lookupErrorMessage = nil
+
+        let query = OnlineTrackMetadataLookupService.Query(
+            title: id3Title,
+            artist: id3Artist,
+            album: id3Album
+        )
+        let sourceSelection = lookupSourceSelection
+
+        Task {
+            do {
+                let results = try await OnlineTrackMetadataLookupService.lookup(
+                    query: query,
+                    sourceSelection: sourceSelection
+                )
+
+                await MainActor.run {
+                    lookupResults = results
+                    if results.isEmpty {
+                        lookupErrorMessage = "No metadata matches found."
+                    }
+                }
+            } catch {
+                await MainActor.run {
+                    lookupErrorMessage = error.localizedDescription
+                }
+            }
+
+            await MainActor.run {
+                isSearchingLookup = false
+            }
+        }
+    }
+
+    private func applyLookupCandidate(_ candidate: OnlineTrackMetadataCandidate) {
+        if !candidate.title.isEmpty {
+            id3Title = candidate.title
+        }
+        if !candidate.artist.isEmpty {
+            id3Artist = candidate.artist
+        }
+        if !candidate.album.isEmpty {
+            id3Album = candidate.album
+        }
+        if !candidate.genre.isEmpty {
+            id3Genre = candidate.genre
+        }
+        if let year = candidate.year {
+            id3Year = String(year)
+        }
+        if let bpm = candidate.bpm {
+            id3BPM = String(format: "%.0f", bpm)
+        }
+        if !candidate.comment.isEmpty {
+            id3Comment = candidate.comment
+        }
+    }
+
+    private func summary(for candidate: OnlineTrackMetadataCandidate) -> String {
+        [
+            candidate.artist,
+            candidate.album,
+            candidate.genre,
+            candidate.year.map(String.init) ?? ""
+        ]
+        .filter { !$0.isEmpty }
+        .joined(separator: " • ")
     }
 
     private func writeSeratoMetadataForDownloadedFile(
@@ -783,6 +1026,10 @@ struct YouTubeRipView: View {
         databaseFileURL: URL,
         metadata: SeratoTrackMetadataUpdate
     ) throws -> SeratoWriteOutcome {
+        guard !SeratoProcessGuard.isSeratoRunning else {
+            throw SeratoTrackMetadataEditor.EditError.seratoIsRunning
+        }
+
         let storedPath = SeratoLibraryLocator.seratoStoredPath(for: fileURL, rootDirectory: rootDirectory)
 
         if FileManager.default.fileExists(atPath: databaseFileURL.path) {
@@ -813,6 +1060,14 @@ struct YouTubeRipView: View {
             return .updated
         }
         return .unchanged
+    }
+
+    private func resolvePreferredValue(_ primary: String, _ fallback: String?) -> String {
+        let primaryTrimmed = primary.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !primaryTrimmed.isEmpty {
+            return primaryTrimmed
+        }
+        return fallback?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
     }
 
     private func normalizeVideoURL(from rawText: String) -> URL? {
