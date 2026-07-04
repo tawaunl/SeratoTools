@@ -40,6 +40,34 @@ public struct SeratoTrackMetadataUpdate: Sendable {
 /// would silently drop fields Serato understands but we don't yet model —
 /// unacceptable for a file a bug could corrupt in a real user's library.
 public enum SeratoDatabaseWriter {
+    /// Ensures `database V2` has an `otrk` record for `storedPath`.
+    /// Returns rewritten bytes and whether a new track record was inserted.
+    public static func ensuringTrackExists(
+        forStoredPath storedPath: String,
+        metadata: SeratoTrackMetadataUpdate? = nil,
+        in fileData: Data
+    ) -> (data: Data, didInsert: Bool) {
+        let topLevel = SeratoChunkCodec.readChunks(from: fileData)
+
+        let alreadyExists = topLevel.contains { chunk in
+            guard chunk.tag == "otrk" else { return false }
+            let fields = SeratoChunkCodec.readChunks(from: chunk.payload)
+            guard let pfilField = fields.first(where: { $0.tag == "pfil" }) else {
+                return false
+            }
+            return SeratoChunkCodec.decodeUTF16BEString(pfilField.payload) == storedPath
+        }
+
+        guard !alreadyExists else {
+            return (fileData, false)
+        }
+
+        let newTrack = makeTrackChunk(storedPath: storedPath, metadata: metadata)
+        var newChunks = topLevel
+        newChunks.append(newTrack)
+        return (SeratoChunkCodec.writeChunks(newChunks), true)
+    }
+
     /// Rewrites the `pfil` field of every `otrk` record whose current
     /// decoded path equals `oldPath`, replacing it with `newPath`. Returns
     /// the new file contents and whether any record was actually changed.
@@ -168,5 +196,28 @@ public enum SeratoDatabaseWriter {
 
         guard !trimmed.isEmpty else { return }
         fields.append(SeratoChunk(tag: tag, payload: SeratoChunkCodec.encodeUTF16BEString(trimmed)))
+    }
+
+    private static func makeTrackChunk(
+        storedPath: String,
+        metadata: SeratoTrackMetadataUpdate?
+    ) -> SeratoChunk {
+        var fields: [SeratoChunk] = [
+            SeratoChunk(tag: "pfil", payload: SeratoChunkCodec.encodeUTF16BEString(storedPath)),
+            SeratoChunk(tag: "bmis", payload: Data([0x00]))
+        ]
+
+        if let metadata {
+            upsertStringField("tsng", value: metadata.title, in: &fields)
+            upsertStringField("tart", value: metadata.artist, in: &fields)
+            upsertStringField("talb", value: metadata.album, in: &fields)
+            upsertStringField("tgen", value: metadata.genre, in: &fields)
+            upsertStringField("tcom", value: metadata.comment, in: &fields)
+            upsertStringField("tkey", value: metadata.key, in: &fields)
+            upsertStringField("tbpm", value: metadata.bpm.map { String(format: "%.0f", $0) } ?? "", in: &fields)
+            upsertStringField("ttyr", value: metadata.year.map(String.init) ?? "", in: &fields)
+        }
+
+        return SeratoChunk(tag: "otrk", payload: SeratoChunkCodec.writeChunks(fields))
     }
 }

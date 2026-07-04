@@ -42,7 +42,7 @@ public enum SeratoTrackMetadataEditor {
 
         // Update on-disk ID3 first so we never commit DB-only edits when a
         // file-tag write fails.
-        try writeID3IfSupported(fileURL: track.fileURL, metadata: metadata)
+        try writeID3Tags(fileURL: track.fileURL, metadata: metadata)
 
         if FileManager.default.fileExists(atPath: databaseFileURL.path) {
             try SeratoBackupBeforeWrite.snapshot(of: databaseFileURL)
@@ -79,6 +79,10 @@ public enum SeratoTrackMetadataEditor {
         }
 
         try AtomicFileWriter.write(rewritten.data, to: databaseFileURL)
+    }
+
+    public static func writeID3Tags(fileURL: URL, metadata: SeratoTrackMetadataUpdate) throws {
+        try writeID3IfSupported(fileURL: fileURL, metadata: metadata)
     }
 
     private static func writeID3IfSupported(fileURL: URL, metadata: SeratoTrackMetadataUpdate) throws {

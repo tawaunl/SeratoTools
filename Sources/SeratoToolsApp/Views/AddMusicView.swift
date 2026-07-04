@@ -3,6 +3,25 @@ import AppKit
 import SeratoToolsCore
 
 struct AddMusicView: View {
+    private enum CrateAssignmentMode: String, CaseIterable, Identifiable {
+        case dated
+        case existing
+        case none
+
+        var id: String { rawValue }
+
+        var displayName: String {
+            switch self {
+            case .dated:
+                return "Dated Crate"
+            case .existing:
+                return "Existing Crate"
+            case .none:
+                return "No Crate"
+            }
+        }
+    }
+
     @EnvironmentObject private var libraryService: LibraryService
 
     let onLibraryChanged: () -> Void
@@ -10,6 +29,8 @@ struct AddMusicView: View {
     @State private var selectedInputURLs: [URL] = []
     @State private var destinationPath = ""
     @State private var cratePrefix = "New Music"
+    @State private var crateAssignmentMode: CrateAssignmentMode = .dated
+    @State private var selectedExistingCrateID: UUID?
     @State private var transferMode: AddMusicImportService.TransferMode = .move
     @State private var discoveredAudioCount = 0
     @State private var isRunning = false
@@ -29,6 +50,28 @@ struct AddMusicView: View {
             .appendingPathComponent("Music", isDirectory: true)
     }
 
+    private var availableCrates: [Crate] {
+        libraryService.crates.sorted {
+            $0.pathComponents.joined(separator: " / ").localizedStandardCompare(
+                $1.pathComponents.joined(separator: " / ")
+            ) == .orderedAscending
+        }
+    }
+
+    private var selectedExistingCrate: Crate? {
+        guard let selectedExistingCrateID else { return nil }
+        return availableCrates.first { $0.id == selectedExistingCrateID }
+    }
+
+    private var isCrateSelectionValid: Bool {
+        switch crateAssignmentMode {
+        case .dated, .none:
+            return true
+        case .existing:
+            return selectedExistingCrate != nil
+        }
+    }
+
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 16) {
@@ -44,6 +87,12 @@ struct AddMusicView: View {
                 destinationPath = defaultDestinationFolderURL.path
             }
             refreshDiscoveredCount()
+        }
+        .onChange(of: crateAssignmentMode) {
+            guard crateAssignmentMode == .existing else { return }
+            if selectedExistingCrateID == nil {
+                selectedExistingCrateID = availableCrates.first?.id
+            }
         }
     }
 
@@ -110,9 +159,47 @@ struct AddMusicView: View {
                     .textFieldStyle(.roundedBorder)
             }
 
+            HStack(spacing: 10) {
+                Picker("Crate Assignment", selection: $crateAssignmentMode) {
+                    ForEach(CrateAssignmentMode.allCases) { mode in
+                        Text(mode.displayName).tag(mode)
+                    }
+                }
+                .frame(maxWidth: 220)
+                Spacer(minLength: 0)
+            }
+
+            if crateAssignmentMode == .existing {
+                HStack(spacing: 10) {
+                    Picker(
+                        "Existing Crate",
+                        selection: Binding(
+                            get: { selectedExistingCrateID?.uuidString ?? "" },
+                            set: { newValue in
+                                selectedExistingCrateID = UUID(uuidString: newValue)
+                            }
+                        )
+                    ) {
+                        Text("Select Crate").tag("")
+                        ForEach(availableCrates, id: \.id) { crate in
+                            Text(crate.pathComponents.joined(separator: " / "))
+                                .tag(crate.id.uuidString)
+                        }
+                    }
+                    .frame(maxWidth: 420)
+                    Spacer(minLength: 0)
+                }
+            }
+
             Text("Crate format: \(normalizedCratePrefix) YYYY-MM-DD")
                 .font(.footnote)
                 .foregroundStyle(.secondary)
+
+            if crateAssignmentMode == .none {
+                Text("No crate will be updated for this import.")
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+            }
         }
         .padding(16)
         .background(RoundedRectangle(cornerRadius: 12).fill(Color(nsColor: .controlBackgroundColor).opacity(0.55)))
@@ -188,7 +275,7 @@ struct AddMusicView: View {
     }
 
     private var isImportDisabled: Bool {
-        isRunning || selectedInputURLs.isEmpty || discoveredAudioCount == 0
+        isRunning || selectedInputURLs.isEmpty || discoveredAudioCount == 0 || !isCrateSelectionValid
     }
 
     private func summaryTag(title: String, value: String, accent: Bool = false) -> some View {
@@ -269,24 +356,59 @@ struct AddMusicView: View {
         let inputURLs = selectedInputURLs
         let destinationFolder = destinationFolderURL
         let cratePrefix = normalizedCratePrefix
+        let crateAssignmentMode = crateAssignmentMode
+        let selectedExistingCrate = selectedExistingCrate
         let transferMode = transferMode
         let subcratesDirectory = libraryService.subcratesDirectory
         let rootDirectory = libraryService.rootDirectory
 
         Task {
             do {
-                let result = try await Task.detached(priority: .userInitiated) {
-                    try AddMusicImportService.importIntoDatedCrate(
-                        inputURLs: inputURLs,
-                        destinationFolderURL: destinationFolder,
-                        crateNamePrefix: cratePrefix,
-                        transferMode: transferMode,
-                        subcratesDirectory: subcratesDirectory,
+                switch crateAssignmentMode {
+                case .dated:
+                    let result = try await Task.detached(priority: .userInitiated) {
+                        try AddMusicImportService.importIntoDatedCrate(
+                            inputURLs: inputURLs,
+                            destinationFolderURL: destinationFolder,
+                            crateNamePrefix: cratePrefix,
+                            transferMode: transferMode,
+                            subcratesDirectory: subcratesDirectory,
+                            rootDirectory: rootDirectory
+                        )
+                    }.value
+
+                    successMessage = "Imported \(result.importedTrackCount) tracks and created crate \(result.crateName)."
+                case .existing:
+                    guard let selectedExistingCrate else {
+                        throw AddMusicImportService.ImportError.missingCrateFileURL
+                    }
+                    let importedFiles = try await Task.detached(priority: .userInitiated) {
+                        try AddMusicImportService.importAudioFiles(
+                            inputURLs: inputURLs,
+                            destinationFolderURL: destinationFolder,
+                            transferMode: transferMode
+                        )
+                    }.value
+
+                    let crateResult = try AddMusicImportService.appendAudioFiles(
+                        importedFiles.importedFileURLs,
+                        toExistingCrate: selectedExistingCrate,
                         rootDirectory: rootDirectory
                     )
-                }.value
 
-                successMessage = "Imported \(result.importedTrackCount) tracks into \(result.destinationFolderURL.lastPathComponent) and created crate \(result.crateName)."
+                    successMessage = "Imported \(importedFiles.importedTrackCount) tracks and saved to crate \(crateResult.crateName)."
+                case .none:
+                    let importedFiles = try await Task.detached(priority: .userInitiated) {
+                        try AddMusicImportService.importAudioFiles(
+                            inputURLs: inputURLs,
+                            destinationFolderURL: destinationFolder,
+                            transferMode: transferMode
+                        )
+                    }.value
+
+                    successMessage = "Imported \(importedFiles.importedTrackCount) tracks with no crate assignment."
+                }
+
                 onLibraryChanged()
                 selectedInputURLs = []
                 refreshDiscoveredCount()

@@ -9,6 +9,7 @@ public enum AddMusicImportService {
     public enum ImportError: Error, LocalizedError {
         case noInputSelected
         case noSupportedAudioFiles
+        case missingCrateFileURL
         case fileTransferFailed(URL, URL, mode: TransferMode, underlying: Error)
         case rollbackFailed(URL, URL)
 
@@ -18,6 +19,8 @@ public enum AddMusicImportService {
                 return "Choose at least one file or folder to import."
             case .noSupportedAudioFiles:
                 return "No supported audio files were found in the selected items."
+            case .missingCrateFileURL:
+                return "The selected crate is missing its file path on disk."
             case let .fileTransferFailed(sourceURL, destinationURL, mode, _):
                 let verb = mode == .copy ? "copy" : "move"
                 return "Couldn't \(verb) \(sourceURL.lastPathComponent) into \(destinationURL.deletingLastPathComponent().path)."
@@ -32,6 +35,8 @@ public enum AddMusicImportService {
                 return "Pick files or folders, then import again."
             case .noSupportedAudioFiles:
                 return "Include supported formats like mp3, m4a, aac, wav, aif, aiff, flac, alac, or ogg."
+            case .missingCrateFileURL:
+                return "Reload the library and select the crate again."
             case .fileTransferFailed:
                 return "Check disk permissions and free space, then retry."
             case .rollbackFailed:
@@ -46,6 +51,19 @@ public enum AddMusicImportService {
         public let crateName: String
         public let destinationFolderURL: URL
         public let transferMode: TransferMode
+    }
+
+    public struct ImportFilesResult: Sendable {
+        public let importedTrackCount: Int
+        public let destinationFolderURL: URL
+        public let transferMode: TransferMode
+        public let importedFileURLs: [URL]
+    }
+
+    public struct CrateCreationResult: Sendable {
+        public let crateFileURL: URL
+        public let crateName: String
+        public let trackCount: Int
     }
 
     // Common DJ-library audio formats.
@@ -104,6 +122,37 @@ public enum AddMusicImportService {
         date: Date = Date(),
         fileManager: FileManager = .default
     ) throws -> ImportResult {
+        let imported = try importAudioFiles(
+            inputURLs: inputURLs,
+            destinationFolderURL: destinationFolderURL,
+            transferMode: transferMode,
+            fileManager: fileManager
+        )
+
+        let crateResult = try createDatedCrate(
+            forAudioFiles: imported.importedFileURLs,
+            crateNamePrefix: crateNamePrefix,
+            subcratesDirectory: subcratesDirectory,
+            rootDirectory: rootDirectory,
+            date: date,
+            fileManager: fileManager
+        )
+
+        return ImportResult(
+            importedTrackCount: imported.importedTrackCount,
+            crateFileURL: crateResult.crateFileURL,
+            crateName: crateResult.crateName,
+            destinationFolderURL: imported.destinationFolderURL,
+            transferMode: imported.transferMode
+        )
+    }
+
+    public static func importAudioFiles(
+        inputURLs: [URL],
+        destinationFolderURL: URL,
+        transferMode: TransferMode,
+        fileManager: FileManager = .default
+    ) throws -> ImportFilesResult {
         guard !inputURLs.isEmpty else {
             throw ImportError.noInputSelected
         }
@@ -123,26 +172,83 @@ public enum AddMusicImportService {
         )
         let executedPairs = try transferFiles(transferPairs, mode: transferMode, fileManager: fileManager)
 
-        do {
-            let storedPaths = executedPairs.map { (_, destinationURL) in
-                SeratoLibraryLocator.seratoStoredPath(for: destinationURL, rootDirectory: rootDirectory)
-            }
-            let crateName = uniqueCrateName(prefix: crateNamePrefix, date: date, subcratesDirectory: subcratesDirectory, fileManager: fileManager)
-            let crateURL = subcratesDirectory.appendingPathComponent(crateName).appendingPathExtension("crate")
-            let crateData = SeratoCrateWriter.makeCrateData(trackPaths: storedPaths)
-            try AtomicFileWriter.write(crateData, to: crateURL)
+        return ImportFilesResult(
+            importedTrackCount: executedPairs.count,
+            destinationFolderURL: importFolderURL,
+            transferMode: transferMode,
+            importedFileURLs: executedPairs.map(\.destinationURL)
+        )
+    }
 
-            return ImportResult(
-                importedTrackCount: executedPairs.count,
-                crateFileURL: crateURL,
-                crateName: crateName,
-                destinationFolderURL: importFolderURL,
-                transferMode: transferMode
-            )
-        } catch {
-            try rollbackTransfers(executedPairs, mode: transferMode, fileManager: fileManager)
-            throw error
+    public static func createDatedCrate(
+        forAudioFiles audioFiles: [URL],
+        crateNamePrefix: String,
+        subcratesDirectory: URL,
+        rootDirectory: URL,
+        date: Date = Date(),
+        fileManager: FileManager = .default
+    ) throws -> CrateCreationResult {
+        guard !audioFiles.isEmpty else {
+            throw ImportError.noSupportedAudioFiles
         }
+
+        let existingFiles = audioFiles
+            .map(\.standardizedFileURL)
+            .filter { fileManager.fileExists(atPath: $0.path) }
+        guard !existingFiles.isEmpty else {
+            throw ImportError.noSupportedAudioFiles
+        }
+
+        let storedPaths = existingFiles.map {
+            SeratoLibraryLocator.seratoStoredPath(for: $0, rootDirectory: rootDirectory)
+        }
+        let crateName = uniqueCrateName(prefix: crateNamePrefix, date: date, subcratesDirectory: subcratesDirectory, fileManager: fileManager)
+        let crateURL = subcratesDirectory.appendingPathComponent(crateName).appendingPathExtension("crate")
+        let crateData = SeratoCrateWriter.makeCrateData(trackPaths: storedPaths)
+        try AtomicFileWriter.write(crateData, to: crateURL)
+
+        return CrateCreationResult(
+            crateFileURL: crateURL,
+            crateName: crateName,
+            trackCount: storedPaths.count
+        )
+    }
+
+    public static func appendAudioFiles(
+        _ audioFiles: [URL],
+        toExistingCrate crate: Crate,
+        rootDirectory: URL,
+        fileManager: FileManager = .default
+    ) throws -> CrateCreationResult {
+        guard let crateURL = crate.fileURL else {
+            throw ImportError.missingCrateFileURL
+        }
+
+        let existingFiles = audioFiles
+            .map(\.standardizedFileURL)
+            .filter { fileManager.fileExists(atPath: $0.path) }
+        guard !existingFiles.isEmpty else {
+            throw ImportError.noSupportedAudioFiles
+        }
+
+        let newStoredPaths = existingFiles.map {
+            SeratoLibraryLocator.seratoStoredPath(for: $0, rootDirectory: rootDirectory)
+        }
+
+        let mergedTrackPaths = uniquePreservingOrder(crate.trackPaths + newStoredPaths)
+
+        if fileManager.fileExists(atPath: crateURL.path) {
+            try SeratoBackupBeforeWrite.snapshot(of: crateURL)
+        }
+
+        let data = SeratoCrateWriter.makeCrateData(trackPaths: mergedTrackPaths)
+        try AtomicFileWriter.write(data, to: crateURL)
+
+        return CrateCreationResult(
+            crateFileURL: crateURL,
+            crateName: crate.name,
+            trackCount: newStoredPaths.count
+        )
     }
 
     private static func isSupportedAudioFile(_ url: URL) -> Bool {
@@ -271,5 +377,16 @@ public enum AddMusicImportService {
 
         reservedDestinations.insert(candidatePath(candidate))
         return candidate
+    }
+
+    private static func uniquePreservingOrder(_ values: [String]) -> [String] {
+        var seen = Set<String>()
+        var output: [String] = []
+        for value in values {
+            if seen.insert(value).inserted {
+                output.append(value)
+            }
+        }
+        return output
     }
 }

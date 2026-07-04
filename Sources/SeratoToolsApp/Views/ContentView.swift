@@ -5,6 +5,7 @@ import SeratoToolsCore
 enum SidebarSection: Hashable {
     case tracks
     case addMusic
+    case youtubeRip
     case crates
     case tags
     case missingTracks
@@ -295,6 +296,7 @@ struct ContentView: View {
         List(selection: $selectedSection) {
             Label("Tracks", systemImage: "music.note.list").tag(SidebarSection.tracks)
             Label("Add Music", systemImage: "plus.square.on.square").tag(SidebarSection.addMusic)
+            Label("YouTube Rip", systemImage: "arrow.down.circle").tag(SidebarSection.youtubeRip)
             Label("Crates", systemImage: "square.stack").tag(SidebarSection.crates)
             Label("Tags", systemImage: "tag").tag(SidebarSection.tags)
             Label("Missing Tracks", systemImage: "exclamationmark.triangle").tag(SidebarSection.missingTracks)
@@ -439,6 +441,8 @@ struct ContentView: View {
             }
         case .addMusic:
             AddMusicView(onLibraryChanged: reloadLibrary)
+        case .youtubeRip:
+            YouTubeRipView(onLibraryChanged: reloadLibrary)
         case .tags:
             TagsBulkEditView(onApplyMetadata: { track, metadata in
                 try saveTrackMetadataEdit(track: track, metadata: metadata)
