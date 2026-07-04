@@ -4,6 +4,8 @@ import SeratoToolsCore
 
 enum SidebarSection: Hashable {
     case tracks
+    case addMusic
+    case youtubeRip
     case crates
     case tags
     case missingTracks
@@ -264,6 +266,8 @@ struct ContentView: View {
     private var sidebar: some View {
         List(selection: $selectedSection) {
             Label("Tracks", systemImage: "music.note.list").tag(SidebarSection.tracks)
+            Label("Add Music", systemImage: "plus.square.on.square").tag(SidebarSection.addMusic)
+            Label("YouTube Rip", systemImage: "arrow.down.circle").tag(SidebarSection.youtubeRip)
             Label("Crates", systemImage: "square.stack").tag(SidebarSection.crates)
             Label("Tags", systemImage: "tag").tag(SidebarSection.tags)
             Label("Missing Tracks", systemImage: "exclamationmark.triangle").tag(SidebarSection.missingTracks)
@@ -416,6 +420,10 @@ struct ContentView: View {
                     )
                 }
             }
+        case .addMusic:
+            AddMusicView(onLibraryChanged: reloadLibrary)
+        case .youtubeRip:
+            YouTubeRipView(onLibraryChanged: reloadLibrary)
         case .tags:
             TagsBulkEditView(onApplyMetadata: { track, metadata in
                 try saveTrackMetadataEdit(track: track, metadata: metadata)
@@ -561,9 +569,6 @@ struct ContentView: View {
 
     private func removeTracksFromLibraryMetadata(paths: Set<String>) throws {
         guard !paths.isEmpty else { return }
-        guard !SeratoProcessGuard.isSeratoRunning else {
-            throw SeratoPathRewriter.RewriteError.seratoIsRunning
-        }
 
         let databaseURL = libraryService.databaseFile
         if FileManager.default.fileExists(atPath: databaseURL.path) {
@@ -597,7 +602,8 @@ struct ContentView: View {
         try SeratoTrackMetadataEditor.update(
             track: track,
             metadata: metadata,
-            databaseFileURL: libraryService.databaseFile
+            databaseFileURL: libraryService.databaseFile,
+            rewriteFilenameFromMetadata: SeratoFeatureFlags.isAutoRenameFromMetadataEnabled()
         )
         reloadLibrary()
     }
@@ -611,6 +617,7 @@ private struct DiscogsTokenSettingsSheet: View {
     @State private var statusMessage: String?
     @State private var validatingAcoustIDKey = false
     @State private var showHelp = false
+    @AppStorage(SeratoFeatureFlags.autoRenameFromMetadataDefaultsKey) private var autoRenameFromMetadata = true
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
@@ -683,6 +690,19 @@ private struct DiscogsTokenSettingsSheet: View {
                             .font(.caption)
                             .foregroundStyle(.secondary)
                     }
+
+                    Divider()
+
+                    Text("Automation")
+                        .font(.subheadline.weight(.semibold))
+
+                    Toggle("Auto rename files from metadata", isOn: $autoRenameFromMetadata)
+                        .toggleStyle(.switch)
+                        .controlSize(.small)
+
+                    Text("When saving ID3/track metadata, rename files as title-artist-album-year and update Serato database/crate paths.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
                 }
             }
 
@@ -725,8 +745,16 @@ private struct DiscogsTokenSettingsSheet: View {
         .padding(16)
         .frame(width: 560, height: 520)
         .onAppear {
+            initializeFeatureDefaultsIfNeeded()
             discogsTokenInput = UserDefaults.standard.string(forKey: OnlineTrackMetadataLookupService.discogsTokenDefaultsKey) ?? ""
             acoustIDKeyInput = UserDefaults.standard.string(forKey: AudioFingerprintService.tokenDefaultsKey) ?? ""
+        }
+    }
+
+    private func initializeFeatureDefaultsIfNeeded() {
+        let defaults = UserDefaults.standard
+        if defaults.object(forKey: SeratoFeatureFlags.autoRenameFromMetadataDefaultsKey) == nil {
+            defaults.set(true, forKey: SeratoFeatureFlags.autoRenameFromMetadataDefaultsKey)
         }
     }
 

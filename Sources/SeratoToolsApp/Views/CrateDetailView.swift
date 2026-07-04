@@ -314,9 +314,6 @@ struct CrateDetailView: View {
 
     private func removeTracksFromLibraryMetadata(paths: Set<String>) throws {
         guard !paths.isEmpty else { return }
-        guard !SeratoProcessGuard.isSeratoRunning else {
-            throw SeratoPathRewriter.RewriteError.seratoIsRunning
-        }
 
         let databaseURL = libraryService.databaseFile
         if FileManager.default.fileExists(atPath: databaseURL.path) {
@@ -350,7 +347,8 @@ struct CrateDetailView: View {
         try SeratoTrackMetadataEditor.update(
             track: track,
             metadata: metadata,
-            databaseFileURL: libraryService.databaseFile
+            databaseFileURL: libraryService.databaseFile,
+            rewriteFilenameFromMetadata: SeratoFeatureFlags.isAutoRenameFromMetadataEnabled()
         )
         onCratesChanged()
     }

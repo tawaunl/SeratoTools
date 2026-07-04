@@ -8,11 +8,16 @@ let package = Package(
     ],
     products: [
         .executable(name: "SeratoTools", targets: ["SeratoToolsApp"]),
+        .executable(name: "SeratoToolsCLI", targets: ["SeratoToolsCLI"]),
         .library(name: "SeratoToolsCore", targets: ["SeratoToolsCore"])
     ],
     targets: [
         .target(
             name: "SeratoToolsCore"
+        ),
+        .executableTarget(
+            name: "SeratoToolsCLI",
+            dependencies: ["SeratoToolsCore"]
         ),
         .executableTarget(
             name: "SeratoToolsApp",
