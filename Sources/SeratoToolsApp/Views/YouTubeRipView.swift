@@ -757,12 +757,35 @@ struct YouTubeRipView: View {
                     )
                 }.value
 
+                var id3MetadataWarning: String?
                 var seratoMetadataWarning: String?
                 var seratoWriteOutcome: SeratoWriteOutcome = .unchanged
                 var metadataForDatabaseWrite = baseMetadata
 
-                if metadataForDatabaseWrite.title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                    metadataForDatabaseWrite.title = result.title
+                let fallbackInfo: YouTubeAudioImportService.VideoInfo?
+                if let loadedInfoSnapshot {
+                    fallbackInfo = loadedInfoSnapshot
+                } else {
+                    fallbackInfo = try? await Task.detached(priority: .utility) {
+                        try YouTubeAudioImportService.fetchVideoInfo(videoURL: videoURL)
+                    }.value
+                }
+
+                metadataForDatabaseWrite = enrichMetadata(
+                    metadataForDatabaseWrite,
+                    fallbackInfo: fallbackInfo,
+                    downloadedTitle: result.title
+                )
+
+                if selectedFormat == .mp3 {
+                    do {
+                        try SeratoTrackMetadataEditor.writeID3Tags(
+                            fileURL: result.outputFileURL,
+                            metadata: metadataForDatabaseWrite
+                        )
+                    } catch {
+                        id3MetadataWarning = "ID3 write failed: \(error.localizedDescription)"
+                    }
                 }
 
                 do {
@@ -808,6 +831,10 @@ struct YouTubeRipView: View {
                         crateLabel = "No Crate"
                     }
 
+                    if let id3MetadataWarning, !id3MetadataWarning.isEmpty {
+                        successMessage = (successMessage ?? "") + " \(id3MetadataWarning)"
+                    }
+
                     if let seratoMetadataWarning, !seratoMetadataWarning.isEmpty {
                         successMessage = (successMessage ?? "") + " \(seratoMetadataWarning)"
                         lastSeratoWriteStatusMessage = "Serato DB: write failed"
@@ -820,6 +847,10 @@ struct YouTubeRipView: View {
                         case .unchanged:
                             lastSeratoWriteStatusMessage = "Serato DB: track row already up to date"
                         }
+                    }
+
+                    if let analyzeWarning = SeratoAutomationService.triggerAnalyzeFilesIfRunning() {
+                        successMessage = (successMessage ?? "") + " " + analyzeWarning
                     }
 
                     appendRecentDownload(
@@ -870,6 +901,42 @@ struct YouTubeRipView: View {
             bpm: Double(id3BPM.trimmingCharacters(in: .whitespacesAndNewlines)),
             year: Int(id3Year.trimmingCharacters(in: .whitespacesAndNewlines))
         )
+    }
+
+    private func enrichMetadata(
+        _ metadata: SeratoTrackMetadataUpdate,
+        fallbackInfo: YouTubeAudioImportService.VideoInfo?,
+        downloadedTitle: String
+    ) -> SeratoTrackMetadataUpdate {
+        var out = metadata
+
+        if out.title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            out.title = fallbackInfo?.title.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+            if out.title.isEmpty {
+                out.title = downloadedTitle
+            }
+        }
+
+        if out.artist.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            out.artist = fallbackInfo?.uploader.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        }
+
+        if out.album.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            out.album = fallbackInfo?.channel.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        }
+
+        if out.comment.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            out.comment = fallbackInfo?.webpageURL?.absoluteString ?? ""
+        }
+
+        if out.year == nil,
+           let uploadDate = fallbackInfo?.uploadDate,
+           uploadDate.count >= 4,
+           let parsedYear = Int(uploadDate.prefix(4)) {
+            out.year = parsedYear
+        }
+
+        return out
     }
 
     private func formatDuration(_ seconds: Int) -> String {
@@ -1026,17 +1093,18 @@ struct YouTubeRipView: View {
         databaseFileURL: URL,
         metadata: SeratoTrackMetadataUpdate
     ) throws -> SeratoWriteOutcome {
-        guard !SeratoProcessGuard.isSeratoRunning else {
-            throw SeratoTrackMetadataEditor.EditError.seratoIsRunning
-        }
-
-        let storedPath = SeratoLibraryLocator.seratoStoredPath(for: fileURL, rootDirectory: rootDirectory)
-
         if FileManager.default.fileExists(atPath: databaseFileURL.path) {
             try SeratoBackupBeforeWrite.snapshot(of: databaseFileURL)
         }
 
         let original = try Data(contentsOf: databaseFileURL)
+        let defaultStoredPath = SeratoLibraryLocator.seratoStoredPath(for: fileURL, rootDirectory: rootDirectory)
+        let storedPath = findExistingStoredPath(
+            for: fileURL,
+            rootDirectory: rootDirectory,
+            in: original
+        ) ?? defaultStoredPath
+
         let ensured = SeratoDatabaseWriter.ensuringTrackExists(
             forStoredPath: storedPath,
             metadata: metadata,
@@ -1060,6 +1128,46 @@ struct YouTubeRipView: View {
             return .updated
         }
         return .unchanged
+    }
+
+    private func findExistingStoredPath(
+        for fileURL: URL,
+        rootDirectory: URL,
+        in databaseData: Data
+    ) -> String? {
+        let targetPaths = canonicalFilePaths(for: fileURL)
+
+        for chunk in SeratoChunkCodec.readChunks(from: databaseData) where chunk.tag == "otrk" {
+            let fields = SeratoChunkCodec.readChunks(from: chunk.payload)
+            guard let pfil = fields.first(where: { $0.tag == "pfil" }) else { continue }
+
+            let storedPath = SeratoChunkCodec.decodeUTF16BEString(pfil.payload)
+            let resolvedURL = SeratoLibraryLocator.resolve(seratoStoredPath: storedPath, rootDirectory: rootDirectory)
+            if targetPaths.contains(canonicalPathString(for: resolvedURL)) {
+                return storedPath
+            }
+        }
+
+        return nil
+    }
+
+    private func canonicalFilePaths(for fileURL: URL) -> Set<String> {
+        var paths: Set<String> = []
+        paths.insert(canonicalPathString(for: fileURL))
+        paths.insert(canonicalPathString(for: fileURL.standardizedFileURL))
+        paths.insert(canonicalPathString(for: fileURL.resolvingSymlinksInPath().standardizedFileURL))
+        return paths
+    }
+
+    private func canonicalPathString(for fileURL: URL) -> String {
+        var path = fileURL.resolvingSymlinksInPath().standardizedFileURL.path
+
+        // macOS temp and some mounted paths can differ only by the /private prefix.
+        if path.hasPrefix("/private/") {
+            path.removeFirst("/private".count)
+        }
+
+        return path
     }
 
     private func resolvePreferredValue(_ primary: String, _ fallback: String?) -> String {

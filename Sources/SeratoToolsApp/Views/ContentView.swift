@@ -556,9 +556,6 @@ struct ContentView: View {
 
     private func removeTracksFromLibraryMetadata(paths: Set<String>) throws {
         guard !paths.isEmpty else { return }
-        guard !SeratoProcessGuard.isSeratoRunning else {
-            throw SeratoPathRewriter.RewriteError.seratoIsRunning
-        }
 
         let databaseURL = libraryService.databaseFile
         if FileManager.default.fileExists(atPath: databaseURL.path) {
@@ -592,8 +589,12 @@ struct ContentView: View {
         try SeratoTrackMetadataEditor.update(
             track: track,
             metadata: metadata,
-            databaseFileURL: libraryService.databaseFile
+            databaseFileURL: libraryService.databaseFile,
+            rewriteFilenameFromMetadata: SeratoFeatureFlags.isAutoRenameFromMetadataEnabled()
         )
+        if let analyzeWarning = SeratoAutomationService.triggerAnalyzeFilesIfRunning() {
+            trackDeleteErrorMessage = analyzeWarning
+        }
         reloadLibrary()
     }
 }
@@ -606,6 +607,8 @@ private struct DiscogsTokenSettingsSheet: View {
     @State private var statusMessage: String?
     @State private var validatingAcoustIDKey = false
     @State private var showHelp = false
+    @AppStorage(SeratoFeatureFlags.autoAnalyzeAfterWriteDefaultsKey) private var autoAnalyzeAfterWrite = true
+    @AppStorage(SeratoFeatureFlags.autoRenameFromMetadataDefaultsKey) private var autoRenameFromMetadata = true
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
@@ -678,6 +681,27 @@ private struct DiscogsTokenSettingsSheet: View {
                             .font(.caption)
                             .foregroundStyle(.secondary)
                     }
+
+                    Divider()
+
+                    Text("Automation")
+                        .font(.subheadline.weight(.semibold))
+
+                    Toggle("Auto Analyze in Serato after writes", isOn: $autoAnalyzeAfterWrite)
+                        .toggleStyle(.switch)
+                        .controlSize(.small)
+
+                    Text("Triggers Serato's Analyze Files command automatically after metadata saves and imports when Serato is running.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+
+                    Toggle("Auto rename files from metadata", isOn: $autoRenameFromMetadata)
+                        .toggleStyle(.switch)
+                        .controlSize(.small)
+
+                    Text("When saving ID3/track metadata, rename files as title-artist-album-year and update Serato database/crate paths.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
                 }
             }
 
@@ -720,8 +744,19 @@ private struct DiscogsTokenSettingsSheet: View {
         .padding(16)
         .frame(width: 560, height: 520)
         .onAppear {
+            initializeFeatureDefaultsIfNeeded()
             discogsTokenInput = UserDefaults.standard.string(forKey: OnlineTrackMetadataLookupService.discogsTokenDefaultsKey) ?? ""
             acoustIDKeyInput = UserDefaults.standard.string(forKey: AudioFingerprintService.tokenDefaultsKey) ?? ""
+        }
+    }
+
+    private func initializeFeatureDefaultsIfNeeded() {
+        let defaults = UserDefaults.standard
+        if defaults.object(forKey: SeratoFeatureFlags.autoAnalyzeAfterWriteDefaultsKey) == nil {
+            defaults.set(true, forKey: SeratoFeatureFlags.autoAnalyzeAfterWriteDefaultsKey)
+        }
+        if defaults.object(forKey: SeratoFeatureFlags.autoRenameFromMetadataDefaultsKey) == nil {
+            defaults.set(true, forKey: SeratoFeatureFlags.autoRenameFromMetadataDefaultsKey)
         }
     }
 

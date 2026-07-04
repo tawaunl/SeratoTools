@@ -409,6 +409,10 @@ struct AddMusicView: View {
                     successMessage = "Imported \(importedFiles.importedTrackCount) tracks with no crate assignment."
                 }
 
+                if let analyzeWarning = SeratoAutomationService.triggerAnalyzeFilesIfRunning() {
+                    successMessage = (successMessage ?? "") + " " + analyzeWarning
+                }
+
                 onLibraryChanged()
                 selectedInputURLs = []
                 refreshDiscoveredCount()
