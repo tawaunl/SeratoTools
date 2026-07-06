@@ -117,6 +117,16 @@ struct PlaylistMatchView: View {
                 }
                 .disabled(isRunning)
 
+                Button("Save Plan") {
+                    savePlanToDisk()
+                }
+                .disabled(planItems.isEmpty || isRunning)
+
+                Button("Load Plan") {
+                    loadPlanFromDisk()
+                }
+                .disabled(isRunning)
+
                 Spacer(minLength: 0)
             }
 
@@ -183,6 +193,21 @@ struct PlaylistMatchView: View {
                             Text("Versions in library: \(item.versions.count)")
                                 .font(.caption)
                                 .foregroundStyle(.secondary)
+
+                            HStack(spacing: 8) {
+                                Text("\(item.confidence.displayName) Confidence")
+                                    .font(.caption2.weight(.semibold))
+                                    .padding(.horizontal, 8)
+                                    .padding(.vertical, 3)
+                                    .background(
+                                        Capsule().fill(confidenceColor(item.confidence).opacity(0.18))
+                                    )
+                                    .foregroundStyle(confidenceColor(item.confidence))
+
+                                Text(item.reason.displayName)
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                            }
 
                             Picker(
                                 "Selected Version",
@@ -375,6 +400,17 @@ struct PlaylistMatchView: View {
         errorMessage = nil
     }
 
+    private func confidenceColor(_ confidence: PlaylistMatchService.MatchConfidence) -> Color {
+        switch confidence {
+        case .high:
+            return .green
+        case .medium:
+            return .orange
+        case .low:
+            return .red
+        }
+    }
+
     private func runMatch() {
         isRunning = true
         successMessage = nil
@@ -489,6 +525,58 @@ struct PlaylistMatchView: View {
 
         matchedTracks = selectedMatchedTracks(from: matchedEntries)
         successMessage = "Applied \(bulkVersionPreference.displayName) across matched songs."
+    }
+
+    private func savePlanToDisk() {
+        guard !planItems.isEmpty else {
+            errorMessage = PlaylistMatchService.PlanPersistenceError.emptyPlan.localizedDescription
+            return
+        }
+
+        let panel = NSSavePanel()
+        panel.canCreateDirectories = true
+        panel.title = "Save PlaylistMatch Plan"
+        panel.prompt = "Save Plan"
+        panel.nameFieldStringValue = "PlaylistMatch-Plan.playlistmatch-plan.json"
+        panel.allowedContentTypes = []
+
+        guard panel.runModal() == .OK, let destinationURL = panel.url else {
+            return
+        }
+
+        do {
+            try PlaylistMatchService.savePlan(planItems, to: destinationURL)
+            successMessage = "Saved \(planItems.count) plan items to \(destinationURL.lastPathComponent)."
+            errorMessage = nil
+        } catch {
+            errorMessage = error.localizedDescription
+        }
+    }
+
+    private func loadPlanFromDisk() {
+        let panel = NSOpenPanel()
+        panel.canChooseFiles = true
+        panel.canChooseDirectories = false
+        panel.allowsMultipleSelection = false
+        panel.prompt = "Load Plan"
+
+        guard panel.runModal() == .OK, let selectedURL = panel.url else {
+            return
+        }
+
+        do {
+            let loaded = try PlaylistMatchService.loadPlan(from: selectedURL)
+            planItems = loaded
+            youtubeURLByPlanID = Dictionary(uniqueKeysWithValues: loaded.map { ($0.id, "") })
+            planStatusByID = [:]
+            searchingPlanIDs = []
+            rippingPlanIDs = []
+            youtubeSuggestionsByPlanID = [:]
+            successMessage = "Loaded \(loaded.count) plan items from \(selectedURL.lastPathComponent)."
+            errorMessage = nil
+        } catch {
+            errorMessage = error.localizedDescription
+        }
     }
 
     private func preferredDJOrderVersion(in versions: [Track]) -> Track? {

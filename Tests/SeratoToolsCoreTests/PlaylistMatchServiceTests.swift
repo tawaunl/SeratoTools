@@ -43,6 +43,8 @@ import Testing
 
     #expect(result.matchedTracks.count == 1)
     #expect(result.matchedTracks.first?.title == "Headlines")
+    #expect(result.matchedEntries.first?.confidence == .high)
+    #expect(result.matchedEntries.first?.reason == .exactTitleAndArtist)
     #expect(result.planItems.count == 1)
     #expect(result.planItems.first?.entry.title == "Turn Off The Lights")
 }
@@ -99,4 +101,24 @@ import Testing
     let wrapped = "Paste this playlist: <https://open.spotify.com/playlist/37i9dQZF1DX4SBhb3fqCJd>, thanks."
     let extracted = PlaylistMatchService.spotifyPlaylistURL(from: wrapped)
     #expect(extracted?.absoluteString == "https://open.spotify.com/playlist/37i9dQZF1DX4SBhb3fqCJd")
+}
+
+@Test func playlistMatchPlanRoundTripSaveLoad() throws {
+    let tempDirectory = FileManager.default.temporaryDirectory
+        .appendingPathComponent("playlistmatch-plan-tests-\(UUID().uuidString)", isDirectory: true)
+    try FileManager.default.createDirectory(at: tempDirectory, withIntermediateDirectories: true)
+    defer { try? FileManager.default.removeItem(at: tempDirectory) }
+
+    let fileURL = tempDirectory.appendingPathComponent("plan.playlistmatch-plan.json")
+    let source: [PlaylistMatchService.PlanItem] = [
+        .init(entry: .init(title: "Track One", artist: "Artist One", sourceLine: "Artist One - Track One")),
+        .init(entry: .init(title: "Track Two", artist: "Artist Two", sourceLine: "Artist Two - Track Two"))
+    ]
+
+    try PlaylistMatchService.savePlan(source, to: fileURL)
+    let loaded = try PlaylistMatchService.loadPlan(from: fileURL)
+
+    #expect(loaded.count == 2)
+    #expect(loaded[0].entry.title == "Track One")
+    #expect(loaded[1].entry.artist == "Artist Two")
 }

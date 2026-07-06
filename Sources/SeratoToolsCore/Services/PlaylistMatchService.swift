@@ -1,7 +1,7 @@
 import Foundation
 
 public enum PlaylistMatchService {
-    public struct PlaylistEntry: Identifiable, Hashable, Sendable {
+    public struct PlaylistEntry: Identifiable, Hashable, Sendable, Codable {
         public let id: UUID
         public let title: String
         public let artist: String
@@ -15,7 +15,7 @@ public enum PlaylistMatchService {
         }
     }
 
-    public struct PlanItem: Identifiable, Hashable, Sendable {
+    public struct PlanItem: Identifiable, Hashable, Sendable, Codable {
         public let id: UUID
         public let entry: PlaylistEntry
 
@@ -25,17 +25,57 @@ public enum PlaylistMatchService {
         }
     }
 
+    public enum MatchReason: String, CaseIterable, Hashable, Sendable, Codable {
+        case exactTitleAndArtist
+        case exactTitleCloseArtist
+        case exactTitleOnly
+        case fuzzyTitleArtist
+
+        public var displayName: String {
+            switch self {
+            case .exactTitleAndArtist:
+                return "Exact title + artist"
+            case .exactTitleCloseArtist:
+                return "Exact title + close artist"
+            case .exactTitleOnly:
+                return "Exact title only"
+            case .fuzzyTitleArtist:
+                return "Fuzzy title/artist"
+            }
+        }
+    }
+
+    public enum MatchConfidence: String, CaseIterable, Hashable, Sendable, Codable {
+        case high
+        case medium
+        case low
+
+        public var displayName: String {
+            rawValue.capitalized
+        }
+    }
+
     public struct MatchedEntry: Identifiable, Hashable, Sendable {
         public var id: UUID { entry.id }
 
         public let entry: PlaylistEntry
         public let primaryTrack: Track
         public let versions: [Track]
+        public let reason: MatchReason
+        public let confidence: MatchConfidence
 
-        public init(entry: PlaylistEntry, primaryTrack: Track, versions: [Track]) {
+        public init(
+            entry: PlaylistEntry,
+            primaryTrack: Track,
+            versions: [Track],
+            reason: MatchReason,
+            confidence: MatchConfidence
+        ) {
             self.entry = entry
             self.primaryTrack = primaryTrack
             self.versions = versions
+            self.reason = reason
+            self.confidence = confidence
         }
     }
 
@@ -81,6 +121,40 @@ public enum PlaylistMatchService {
                 return "Review the Plan section and update your library with missing tracks."
             }
         }
+    }
+
+    public enum PlanPersistenceError: LocalizedError {
+        case emptyPlan
+        case unreadablePlan
+        case invalidPlanFormat
+
+        public var errorDescription: String? {
+            switch self {
+            case .emptyPlan:
+                return "There are no plan items to save."
+            case .unreadablePlan:
+                return "Couldn't read the selected plan file."
+            case .invalidPlanFormat:
+                return "That file is not a valid PlaylistMatch plan."
+            }
+        }
+
+        public var recoverySuggestion: String? {
+            switch self {
+            case .emptyPlan:
+                return "Run PlaylistMatch first so unmatched tracks appear in Plan."
+            case .unreadablePlan:
+                return "Check file permissions and try loading again."
+            case .invalidPlanFormat:
+                return "Load a .playlistmatch-plan.json file created by PlaylistMatch."
+            }
+        }
+    }
+
+    private struct PlanFile: Codable {
+        let version: Int
+        let createdAt: Date
+        let items: [PlanItem]
     }
 
     public static func resolveEntries(from input: String, session: URLSession = .shared) async throws -> [PlaylistEntry] {
@@ -132,7 +206,15 @@ public enum PlaylistMatchService {
             let exactKey = "\(entryTitle)|\(entryArtist)"
             if let exact = exactLookup[exactKey]?.first {
                 let versions = libraryVersions(for: entry, selectedTrack: exact, libraryTracks: libraryTracks)
-                matchedEntries.append(MatchedEntry(entry: entry, primaryTrack: exact, versions: versions))
+                matchedEntries.append(
+                    MatchedEntry(
+                        entry: entry,
+                        primaryTrack: exact,
+                        versions: versions,
+                        reason: .exactTitleAndArtist,
+                        confidence: .high
+                    )
+                )
                 if matchedIDs.insert(exact.id).inserted {
                     matched.append(exact)
                 }
@@ -148,7 +230,15 @@ public enum PlaylistMatchService {
                     return candidateArtist.contains(entryArtist) || entryArtist.contains(candidateArtist)
                 }) {
                     let versions = libraryVersions(for: entry, selectedTrack: artistAligned, libraryTracks: libraryTracks)
-                    matchedEntries.append(MatchedEntry(entry: entry, primaryTrack: artistAligned, versions: versions))
+                    matchedEntries.append(
+                        MatchedEntry(
+                            entry: entry,
+                            primaryTrack: artistAligned,
+                            versions: versions,
+                            reason: .exactTitleCloseArtist,
+                            confidence: .high
+                        )
+                    )
                     if matchedIDs.insert(artistAligned.id).inserted {
                         matched.append(artistAligned)
                     }
@@ -157,7 +247,15 @@ public enum PlaylistMatchService {
 
                 if let first = titleCandidates.first {
                     let versions = libraryVersions(for: entry, selectedTrack: first, libraryTracks: libraryTracks)
-                    matchedEntries.append(MatchedEntry(entry: entry, primaryTrack: first, versions: versions))
+                    matchedEntries.append(
+                        MatchedEntry(
+                            entry: entry,
+                            primaryTrack: first,
+                            versions: versions,
+                            reason: .exactTitleOnly,
+                            confidence: .medium
+                        )
+                    )
                     if matchedIDs.insert(first.id).inserted {
                         matched.append(first)
                     }
@@ -167,7 +265,15 @@ public enum PlaylistMatchService {
 
             if let fuzzy = fuzzyFind(entry: entry, in: libraryTracks) {
                 let versions = libraryVersions(for: entry, selectedTrack: fuzzy, libraryTracks: libraryTracks)
-                matchedEntries.append(MatchedEntry(entry: entry, primaryTrack: fuzzy, versions: versions))
+                matchedEntries.append(
+                    MatchedEntry(
+                        entry: entry,
+                        primaryTrack: fuzzy,
+                        versions: versions,
+                        reason: .fuzzyTitleArtist,
+                        confidence: .low
+                    )
+                )
                 if matchedIDs.insert(fuzzy.id).inserted {
                     matched.append(fuzzy)
                 }
@@ -177,6 +283,39 @@ public enum PlaylistMatchService {
         }
 
         return MatchResult(matchedEntries: matchedEntries, matchedTracks: matched, planItems: plan)
+    }
+
+    public static func savePlan(_ planItems: [PlanItem], to fileURL: URL) throws {
+        guard !planItems.isEmpty else {
+            throw PlanPersistenceError.emptyPlan
+        }
+
+        let payload = PlanFile(version: 1, createdAt: Date(), items: planItems)
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
+        encoder.dateEncodingStrategy = .iso8601
+
+        let data = try encoder.encode(payload)
+        try AtomicFileWriter.write(data, to: fileURL)
+    }
+
+    public static func loadPlan(from fileURL: URL) throws -> [PlanItem] {
+        let data: Data
+        do {
+            data = try Data(contentsOf: fileURL)
+        } catch {
+            throw PlanPersistenceError.unreadablePlan
+        }
+
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .iso8601
+
+        do {
+            let payload = try decoder.decode(PlanFile.self, from: data)
+            return payload.items
+        } catch {
+            throw PlanPersistenceError.invalidPlanFormat
+        }
     }
 
     private static func libraryVersions(for entry: PlaylistEntry, selectedTrack: Track, libraryTracks: [Track]) -> [Track] {
