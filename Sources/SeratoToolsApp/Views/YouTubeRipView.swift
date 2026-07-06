@@ -101,8 +101,10 @@ struct YouTubeRipView: View {
     @AppStorage(Self.bitrateDefaultsKey) private var selectedBitrateRaw = BitrateSelection.kbps320.rawValue
 
     @State private var loadedInfo: YouTubeAudioImportService.VideoInfo?
+    @State private var previewInfoByURL: [String: YouTubeAudioImportService.VideoInfo] = [:]
     @State private var isLoadingInfo = false
     @State private var isDownloading = false
+    @State private var isLoadingBatchInfo = false
     @State private var dependencyStatusMessage: String?
     @State private var dependencyReady = false
     @State private var errorMessage: String?
@@ -223,17 +225,27 @@ struct YouTubeRipView: View {
         YouTubeBatchLinkImportService.parseVideoURLs(from: urlText)
     }
 
+    private var isBulkDownload: Bool {
+        parsedVideoURLs.count > 1
+    }
+
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 16) {
                 heroCard
                 urlCard
-                if let loadedInfo {
+                if !parsedVideoURLs.isEmpty {
+                    linkThumbnailsCard
+                }
+                if let loadedInfo, !isBulkDownload {
                     videoPreviewCard(loadedInfo)
                 }
                 outputCard
-                if selectedFormat == .mp3 {
+                if selectedFormat == .mp3 && !isBulkDownload {
                     id3Card
+                }
+                if selectedFormat == .mp3 && isBulkDownload {
+                    bulkID3DisabledCard
                 }
                 if !recentDownloads.isEmpty {
                     recentDownloadsCard
@@ -261,6 +273,12 @@ struct YouTubeRipView: View {
             if selectedExistingCrateID == nil {
                 selectedExistingCrateID = availableCrates.first?.id
             }
+        }
+        .onChange(of: parsedVideoURLs.map(\.absoluteString)) {
+            if !isBulkDownload {
+                loadedInfo = nil
+            }
+            preloadBatchVideoInfo()
         }
     }
 
@@ -340,6 +358,11 @@ struct YouTubeRipView: View {
                     ProgressView()
                         .controlSize(.small)
                 }
+
+                if isLoadingBatchInfo {
+                    ProgressView()
+                        .controlSize(.small)
+                }
             }
 
             let linkCount = parsedVideoURLs.count
@@ -358,6 +381,79 @@ struct YouTubeRipView: View {
                     .font(.footnote)
                     .foregroundColor(dependencyReady ? .secondary : .red)
             }
+        }
+        .padding(16)
+        .background(RoundedRectangle(cornerRadius: 12).fill(Color(nsColor: .controlBackgroundColor).opacity(0.55)))
+    }
+
+    private var linkThumbnailsCard: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack {
+                Text("Link Thumbnails")
+                    .font(.title3.weight(.semibold))
+                Spacer(minLength: 0)
+                Text("\(parsedVideoURLs.count)")
+                    .font(.footnote.weight(.semibold))
+                    .foregroundStyle(.secondary)
+            }
+
+            ScrollView(.horizontal, showsIndicators: true) {
+                HStack(alignment: .top, spacing: 12) {
+                    ForEach(Array(parsedVideoURLs.enumerated()), id: \.offset) { index, videoURL in
+                        let title = previewInfoByURL[videoURL.absoluteString]?.title ?? "Link \(index + 1)"
+                        let subtitle = compactLinkLabel(for: videoURL)
+
+                        VStack(alignment: .leading, spacing: 6) {
+                            Group {
+                                if let thumbnailURL = thumbnailURL(for: videoURL) {
+                                    AsyncImage(url: thumbnailURL) { phase in
+                                        switch phase {
+                                        case let .success(image):
+                                            image
+                                                .resizable()
+                                                .scaledToFill()
+                                        case .failure:
+                                            Color.secondary.opacity(0.18)
+                                                .overlay(Image(systemName: "photo").foregroundStyle(.secondary))
+                                        case .empty:
+                                            ProgressView()
+                                        @unknown default:
+                                            Color.secondary.opacity(0.18)
+                                        }
+                                    }
+                                } else {
+                                    Color.secondary.opacity(0.18)
+                                        .overlay(Image(systemName: "link").foregroundStyle(.secondary))
+                                }
+                            }
+                            .frame(width: 220, height: 124)
+                            .clipShape(RoundedRectangle(cornerRadius: 10))
+
+                            Text(title)
+                                .font(.callout.weight(.semibold))
+                                .lineLimit(2)
+
+                            Text(subtitle)
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                                .lineLimit(2)
+                        }
+                        .frame(width: 220, alignment: .leading)
+                    }
+                }
+                .padding(.bottom, 4)
+            }
+        }
+        .padding(16)
+        .background(RoundedRectangle(cornerRadius: 12).fill(Color(nsColor: .controlBackgroundColor).opacity(0.55)))
+    }
+
+    private var bulkID3DisabledCard: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text("Bulk ID3 Handling")
+                .font(.title3.weight(.semibold))
+            Text("Custom ID3 fields are disabled for multi-link downloads to avoid applying the same tags to the wrong song. Each track uses metadata discovered from YouTube and lookup sources instead.")
+                .foregroundStyle(.secondary)
         }
         .padding(16)
         .background(RoundedRectangle(cornerRadius: 12).fill(Color(nsColor: .controlBackgroundColor).opacity(0.55)))
@@ -736,6 +832,11 @@ struct YouTubeRipView: View {
     }
 
     private func loadVideoInfo() {
+        if isBulkDownload {
+            preloadBatchVideoInfo(forceRefresh: true)
+            return
+        }
+
         guard let videoURL = parsedVideoURL else {
             errorMessage = "Paste at least one valid YouTube URL first."
             return
@@ -753,6 +854,7 @@ struct YouTubeRipView: View {
 
                 await MainActor.run {
                     loadedInfo = info
+                    previewInfoByURL[videoURL.absoluteString] = info
                     id3Title = info.title
                     id3Artist = info.uploader
                     id3Album = info.channel
@@ -806,12 +908,14 @@ struct YouTubeRipView: View {
         let crateAssignmentMode = crateAssignmentMode
         let selectedExistingCrate = selectedExistingCrate
         let loadedInfoSnapshot = loadedInfo
-        let baseMetadata = buildMetadataForSave(
-            fallbackTitle: loadedInfoSnapshot?.title,
-            fallbackArtist: loadedInfoSnapshot?.uploader,
-            fallbackAlbum: loadedInfoSnapshot?.channel,
-            fallbackComment: loadedInfoSnapshot?.webpageURL?.absoluteString
-        )
+        let baseMetadata = isBulkDownload
+            ? emptyMetadataTemplate()
+            : buildMetadataForSave(
+                fallbackTitle: loadedInfoSnapshot?.title,
+                fallbackArtist: loadedInfoSnapshot?.uploader,
+                fallbackAlbum: loadedInfoSnapshot?.channel,
+                fallbackComment: loadedInfoSnapshot?.webpageURL?.absoluteString
+            )
         let metadataForDownload = baseMetadata
         let cratePrefix = normalizedCratePrefix
         let subcratesDirectory = libraryService.subcratesDirectory
@@ -1006,6 +1110,19 @@ struct YouTubeRipView: View {
             key: id3Key,
             bpm: Double(id3BPM.trimmingCharacters(in: .whitespacesAndNewlines)),
             year: Int(id3Year.trimmingCharacters(in: .whitespacesAndNewlines))
+        )
+    }
+
+    private func emptyMetadataTemplate() -> SeratoTrackMetadataUpdate {
+        SeratoTrackMetadataUpdate(
+            title: "",
+            artist: "",
+            album: "",
+            genre: "",
+            comment: "",
+            key: "",
+            bpm: nil,
+            year: nil
         )
     }
 
@@ -1287,6 +1404,86 @@ struct YouTubeRipView: View {
 
     private func normalizeVideoURL(from rawText: String) -> URL? {
         YouTubeBatchLinkImportService.parseVideoURLs(from: rawText).first
+    }
+
+    private func preloadBatchVideoInfo(forceRefresh: Bool = false) {
+        let urls = parsedVideoURLs
+        guard !urls.isEmpty else {
+            previewInfoByURL = [:]
+            isLoadingBatchInfo = false
+            return
+        }
+
+        Task {
+            await MainActor.run {
+                isLoadingBatchInfo = true
+            }
+
+            var loadedCount = 0
+            for videoURL in urls {
+                let key = videoURL.absoluteString
+                if !forceRefresh, previewInfoByURL[key] != nil {
+                    continue
+                }
+
+                let info = await Task.detached(priority: .utility) {
+                    try? YouTubeAudioImportService.fetchVideoInfo(videoURL: videoURL)
+                }.value
+
+                if let info {
+                    loadedCount += 1
+                    await MainActor.run {
+                        previewInfoByURL[key] = info
+                    }
+                }
+            }
+
+            await MainActor.run {
+                isLoadingBatchInfo = false
+                if loadedCount > 0 {
+                    successMessage = "Loaded preview info for \(loadedCount) link\(loadedCount == 1 ? "" : "s")."
+                }
+            }
+        }
+    }
+
+    private func compactLinkLabel(for url: URL) -> String {
+        if let host = url.host {
+            return host + url.path
+        }
+        return url.absoluteString
+    }
+
+    private func thumbnailURL(for videoURL: URL) -> URL? {
+        guard let videoID = youTubeVideoID(from: videoURL) else { return nil }
+        return URL(string: "https://i.ytimg.com/vi/\(videoID)/hqdefault.jpg")
+    }
+
+    private func youTubeVideoID(from url: URL) -> String? {
+        let host = (url.host ?? "").lowercased()
+
+        if host.contains("youtu.be") {
+            let id = url.path.trimmingCharacters(in: CharacterSet(charactersIn: "/"))
+            return id.isEmpty ? nil : id
+        }
+
+        if host.contains("youtube.com") {
+            if let components = URLComponents(url: url, resolvingAgainstBaseURL: false),
+               let v = components.queryItems?.first(where: { $0.name == "v" })?.value,
+               !v.isEmpty {
+                return v
+            }
+
+            let parts = url.path.split(separator: "/").map(String.init)
+            if let shortsIndex = parts.firstIndex(of: "shorts"), shortsIndex + 1 < parts.count {
+                return parts[shortsIndex + 1]
+            }
+            if let embedIndex = parts.firstIndex(of: "embed"), embedIndex + 1 < parts.count {
+                return parts[embedIndex + 1]
+            }
+        }
+
+        return nil
     }
 
     private func deduplicatedURLs(_ urls: [URL]) -> [URL] {
