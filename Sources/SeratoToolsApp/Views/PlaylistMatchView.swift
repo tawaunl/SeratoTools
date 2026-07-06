@@ -3,6 +3,49 @@ import AppKit
 import SeratoToolsCore
 
 struct PlaylistMatchView: View {
+    private enum BulkVersionPreference: String, CaseIterable, Identifiable {
+        case auto
+        case djOrder
+        case intro
+        case extended
+        case instrumental
+        case acapella
+        case clean
+        case dirty
+        case radio
+        case edit
+        case mix
+
+        var id: String { rawValue }
+
+        var displayName: String {
+            switch self {
+            case .auto:
+                return "Keep Current"
+            case .djOrder:
+                return "Prefer DJ Version Order"
+            case .intro:
+                return "Prefer Intro"
+            case .extended:
+                return "Prefer Extended"
+            case .instrumental:
+                return "Prefer Instrumental"
+            case .acapella:
+                return "Prefer Acapella"
+            case .clean:
+                return "Prefer Clean"
+            case .dirty:
+                return "Prefer Dirty"
+            case .radio:
+                return "Prefer Radio"
+            case .edit:
+                return "Prefer Edit"
+            case .mix:
+                return "Prefer Mix"
+            }
+        }
+    }
+
     @EnvironmentObject private var libraryService: LibraryService
 
     let onLibraryChanged: () -> Void
@@ -13,6 +56,9 @@ struct PlaylistMatchView: View {
     @State private var isCreatingCrate = false
     @State private var successMessage: String?
     @State private var errorMessage: String?
+    @State private var matchedEntries: [PlaylistMatchService.MatchedEntry] = []
+    @State private var selectedVersionByEntryID: [UUID: UUID] = [:]
+    @State private var bulkVersionPreference: BulkVersionPreference = .auto
     @State private var matchedTracks: [Track] = []
     @State private var planItems: [PlaylistMatchService.PlanItem] = []
     @State private var resolvedEntryCount = 0
@@ -97,7 +143,8 @@ struct PlaylistMatchView: View {
 
             HStack(spacing: 10) {
                 statTag(title: "Playlist Tracks", value: "\(resolvedEntryCount)")
-                statTag(title: "Matched", value: "\(matchedTracks.count)", accent: true)
+                statTag(title: "Matched Songs", value: "\(matchedEntries.count)", accent: true)
+                statTag(title: "Selected Tracks", value: "\(matchedTracks.count)")
                 statTag(title: "Plan", value: "\(planItems.count)")
                 Spacer(minLength: 0)
             }
@@ -107,16 +154,76 @@ struct PlaylistMatchView: View {
             }
             .disabled(isCreatingCrate || matchedTracks.isEmpty)
 
-            if !matchedTracks.isEmpty {
+            HStack(spacing: 8) {
+                Picker("Bulk Version", selection: $bulkVersionPreference) {
+                    ForEach(BulkVersionPreference.allCases) { preference in
+                        Text(preference.displayName).tag(preference)
+                    }
+                }
+                .pickerStyle(.menu)
+                .frame(maxWidth: 240)
+
+                Button("Apply To All") {
+                    applyBulkVersionPreference()
+                }
+                .disabled(matchedEntries.isEmpty)
+
+                Spacer(minLength: 0)
+            }
+
+            if !matchedEntries.isEmpty {
                 VStack(alignment: .leading, spacing: 4) {
-                    ForEach(Array(matchedTracks.prefix(20)), id: \.id) { track in
-                        Text("• \(track.artist.isEmpty ? "Unknown Artist" : track.artist) - \(track.title.isEmpty ? track.fileURL.lastPathComponent : track.title)")
-                            .font(.callout)
-                            .lineLimit(1)
+                    ForEach(Array(matchedEntries.prefix(20))) { item in
+                        VStack(alignment: .leading, spacing: 4) {
+                            let artist = item.entry.artist.isEmpty ? "Unknown Artist" : item.entry.artist
+                            Text("• \(artist) - \(item.entry.title)")
+                                .font(.callout.weight(.semibold))
+                                .lineLimit(1)
+
+                            Text("Versions in library: \(item.versions.count)")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+
+                            Picker(
+                                "Selected Version",
+                                selection: selectedVersionBinding(for: item)
+                            ) {
+                                ForEach(item.versions, id: \.id) { version in
+                                    Text(versionPickerTitle(for: version))
+                                        .tag(version.id.uuidString)
+                                }
+                            }
+                            .pickerStyle(.menu)
+                            .frame(maxWidth: 440, alignment: .leading)
+
+                            VStack(alignment: .leading, spacing: 2) {
+                                ForEach(Array(item.versions.prefix(6)), id: \.id) { version in
+                                    HStack(spacing: 6) {
+                                        Text(versionLabel(for: version))
+                                            .font(.caption)
+                                            .padding(.horizontal, 6)
+                                            .padding(.vertical, 2)
+                                            .background(
+                                                Capsule().fill(Color.accentColor.opacity(0.14))
+                                            )
+                                        Text(version.title.isEmpty ? version.fileURL.lastPathComponent : version.title)
+                                            .font(.caption)
+                                            .lineLimit(1)
+                                    }
+                                }
+
+                                if item.versions.count > 6 {
+                                    Text("+ \(item.versions.count - 6) more versions")
+                                        .font(.caption2)
+                                        .foregroundStyle(.secondary)
+                                }
+                            }
+                        }
+                        .padding(.vertical, 4)
                     }
 
-                    if matchedTracks.count > 20 {
-                        Text("+ \(matchedTracks.count - 20) more matched tracks")
+                    if matchedEntries.count > 20 {
+                        Text("+ \(matchedEntries.count - 20) more matched songs")
                             .font(.footnote)
                             .foregroundStyle(.secondary)
                     }
@@ -255,6 +362,8 @@ struct PlaylistMatchView: View {
 
     private func clearResults() {
         resolvedEntryCount = 0
+        matchedEntries = []
+        selectedVersionByEntryID = [:]
         matchedTracks = []
         planItems = []
         youtubeURLByPlanID = [:]
@@ -279,12 +388,16 @@ struct PlaylistMatchView: View {
                 let entries = try await PlaylistMatchService.resolveEntries(from: input)
                 let result = PlaylistMatchService.match(entries: entries, libraryTracks: libraryTracks)
                 resolvedEntryCount = entries.count
-                matchedTracks = result.matchedTracks
+                matchedEntries = result.matchedEntries
+                selectedVersionByEntryID = Dictionary(
+                    uniqueKeysWithValues: result.matchedEntries.map { ($0.entry.id, $0.primaryTrack.id) }
+                )
+                matchedTracks = selectedMatchedTracks(from: result.matchedEntries)
                 planItems = result.planItems
                 youtubeURLByPlanID = Dictionary(uniqueKeysWithValues: result.planItems.map { ($0.id, "") })
                 planStatusByID = [:]
                 youtubeSuggestionsByPlanID = [:]
-                successMessage = "Matched \(result.matchedTracks.count) tracks. Added \(result.planItems.count) to Plan."
+                successMessage = "Matched \(result.matchedEntries.count) songs. Added \(result.planItems.count) to Plan."
             } catch {
                 errorMessage = error.localizedDescription
             }
@@ -311,6 +424,124 @@ struct PlaylistMatchView: View {
         }
 
         isCreatingCrate = false
+    }
+
+    private func selectedVersionBinding(for item: PlaylistMatchService.MatchedEntry) -> Binding<String> {
+        Binding(
+            get: {
+                let selectedID = selectedVersionByEntryID[item.entry.id] ?? item.primaryTrack.id
+                return selectedID.uuidString
+            },
+            set: { newValue in
+                guard let trackID = UUID(uuidString: newValue) else { return }
+                selectedVersionByEntryID[item.entry.id] = trackID
+                matchedTracks = selectedMatchedTracks(from: matchedEntries)
+            }
+        )
+    }
+
+    private func selectedMatchedTracks(from entries: [PlaylistMatchService.MatchedEntry]) -> [Track] {
+        var output: [Track] = []
+        var seen = Set<String>()
+
+        for entry in entries {
+            let selectedTrackID = selectedVersionByEntryID[entry.entry.id] ?? entry.primaryTrack.id
+            let selectedTrack = entry.versions.first(where: { $0.id == selectedTrackID }) ?? entry.primaryTrack
+            if seen.insert(selectedTrack.seratoStoredPath).inserted {
+                output.append(selectedTrack)
+            }
+        }
+
+        return output
+    }
+
+    private func versionPickerTitle(for track: Track) -> String {
+        let artist = track.artist.isEmpty ? "Unknown Artist" : track.artist
+        let title = track.title.isEmpty ? track.fileURL.lastPathComponent : track.title
+        return "\(versionLabel(for: track)) • \(artist) - \(title)"
+    }
+
+    private func applyBulkVersionPreference() {
+        guard !matchedEntries.isEmpty else { return }
+
+        switch bulkVersionPreference {
+        case .auto:
+            for entry in matchedEntries {
+                selectedVersionByEntryID[entry.entry.id] = entry.primaryTrack.id
+            }
+        case .djOrder:
+            for entry in matchedEntries {
+                if let preferred = preferredDJOrderVersion(in: entry.versions) {
+                    selectedVersionByEntryID[entry.entry.id] = preferred.id
+                } else {
+                    selectedVersionByEntryID[entry.entry.id] = entry.primaryTrack.id
+                }
+            }
+        default:
+            for entry in matchedEntries {
+                if let preferred = preferredVersion(in: entry.versions, preference: bulkVersionPreference) {
+                    selectedVersionByEntryID[entry.entry.id] = preferred.id
+                } else {
+                    selectedVersionByEntryID[entry.entry.id] = entry.primaryTrack.id
+                }
+            }
+        }
+
+        matchedTracks = selectedMatchedTracks(from: matchedEntries)
+        successMessage = "Applied \(bulkVersionPreference.displayName) across matched songs."
+    }
+
+    private func preferredDJOrderVersion(in versions: [Track]) -> Track? {
+        // Priority order: Intro > Extended > Clean > Dirty > Radio > Original/default.
+        if let intro = versions.first(where: { matches($0, preference: .intro) }) {
+            return intro
+        }
+        if let extended = versions.first(where: { matches($0, preference: .extended) }) {
+            return extended
+        }
+        if let clean = versions.first(where: { matches($0, preference: .clean) }) {
+            return clean
+        }
+        if let dirty = versions.first(where: { matches($0, preference: .dirty) }) {
+            return dirty
+        }
+        if let radio = versions.first(where: { matches($0, preference: .radio) }) {
+            return radio
+        }
+        return versions.first
+    }
+
+    private func preferredVersion(in versions: [Track], preference: BulkVersionPreference) -> Track? {
+        versions.first(where: { matches($0, preference: preference) })
+    }
+
+    private func matches(_ track: Track, preference: BulkVersionPreference) -> Bool {
+        let title = track.title.lowercased()
+
+        switch preference {
+        case .auto:
+            return false
+        case .djOrder:
+            return false
+        case .intro:
+            return title.contains("intro")
+        case .extended:
+            return title.contains("extended")
+        case .instrumental:
+            return title.contains("instrumental")
+        case .acapella:
+            return title.contains("acapella") || title.contains("a cappella")
+        case .clean:
+            return title.contains("clean")
+        case .dirty:
+            return title.contains("dirty")
+        case .radio:
+            return title.contains("radio")
+        case .edit:
+            return title.contains("edit")
+        case .mix:
+            return title.contains("mix")
+        }
     }
 
     private func openYouTubeSearch(for entry: PlaylistMatchService.PlaylistEntry) {
@@ -449,6 +680,38 @@ struct PlaylistMatchView: View {
             .replacingOccurrences(of: "\\", with: "-")
     }
 
+    private func versionLabel(for track: Track) -> String {
+        let title = track.title.lowercased()
+        if title.contains("extended") {
+            return "Extended"
+        }
+        if title.contains("intro") {
+            return "Intro"
+        }
+        if title.contains("instrumental") {
+            return "Instrumental"
+        }
+        if title.contains("acapella") || title.contains("a cappella") {
+            return "Acapella"
+        }
+        if title.contains("clean") {
+            return "Clean"
+        }
+        if title.contains("dirty") {
+            return "Dirty"
+        }
+        if title.contains("radio") {
+            return "Radio"
+        }
+        if title.contains("edit") {
+            return "Edit"
+        }
+        if title.contains("mix") {
+            return "Mix"
+        }
+        return "Version"
+    }
+
     private func resolveOrCreateTargetCrate() throws -> Crate {
         if let existing = libraryService.crates.first(where: { $0.name == targetCrateName }) {
             return existing
@@ -460,7 +723,7 @@ struct PlaylistMatchView: View {
 
         _ = try PlaylistMatchService.createCrateFromMatches(
             crateName: targetCrateName,
-            matchedTracks: matchedTracks,
+            matchedTracks: selectedMatchedTracks(from: matchedEntries),
             subcratesDirectory: libraryService.subcratesDirectory
         )
         onLibraryChanged()

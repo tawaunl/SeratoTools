@@ -47,6 +47,39 @@ import Testing
     #expect(result.planItems.first?.entry.title == "Turn Off The Lights")
 }
 
+@Test func playlistMatchReturnsAllLibraryVersionsForMatchedSong() {
+    let libraryTracks: [Track] = [
+        Track(
+            seratoStoredPath: "Music/Artist - Anthem (Extended Mix).mp3",
+            fileURL: URL(fileURLWithPath: "/tmp/Artist - Anthem (Extended Mix).mp3"),
+            title: "Anthem (Extended Mix)",
+            artist: "Artist"
+        ),
+        Track(
+            seratoStoredPath: "Music/Artist - Anthem (Intro).mp3",
+            fileURL: URL(fileURLWithPath: "/tmp/Artist - Anthem (Intro).mp3"),
+            title: "Anthem (Intro)",
+            artist: "Artist"
+        ),
+        Track(
+            seratoStoredPath: "Music/Artist - Anthem (Instrumental).mp3",
+            fileURL: URL(fileURLWithPath: "/tmp/Artist - Anthem (Instrumental).mp3"),
+            title: "Anthem (Instrumental)",
+            artist: "Artist"
+        )
+    ]
+
+    let entries: [PlaylistMatchService.PlaylistEntry] = [
+        .init(title: "Anthem", artist: "Artist", sourceLine: "Artist - Anthem")
+    ]
+
+    let result = PlaylistMatchService.match(entries: entries, libraryTracks: libraryTracks)
+
+    #expect(result.matchedEntries.count == 1)
+    #expect(result.matchedEntries[0].versions.count == 3)
+    #expect(result.matchedTracks.count == 1)
+}
+
 @Test func playlistMatchExtractsCanonicalSpotifyPlaylistURLFromCommonFormats() {
     let direct = PlaylistMatchService.spotifyPlaylistURL(from: "https://open.spotify.com/playlist/37i9dQZF1DX4SBhb3fqCJd?si=abc123")
     let embed = PlaylistMatchService.spotifyPlaylistURL(from: "https://open.spotify.com/embed/playlist/37i9dQZF1DX4SBhb3fqCJd")

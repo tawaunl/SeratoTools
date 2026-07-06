@@ -25,7 +25,22 @@ public enum PlaylistMatchService {
         }
     }
 
+    public struct MatchedEntry: Identifiable, Hashable, Sendable {
+        public var id: UUID { entry.id }
+
+        public let entry: PlaylistEntry
+        public let primaryTrack: Track
+        public let versions: [Track]
+
+        public init(entry: PlaylistEntry, primaryTrack: Track, versions: [Track]) {
+            self.entry = entry
+            self.primaryTrack = primaryTrack
+            self.versions = versions
+        }
+    }
+
     public struct MatchResult: Sendable {
+        public let matchedEntries: [MatchedEntry]
         public let matchedTracks: [Track]
         public let planItems: [PlanItem]
     }
@@ -103,6 +118,7 @@ public enum PlaylistMatchService {
 
         var matched: [Track] = []
         var matchedIDs = Set<UUID>()
+        var matchedEntries: [MatchedEntry] = []
         var plan: [PlanItem] = []
 
         for entry in entries {
@@ -115,6 +131,8 @@ public enum PlaylistMatchService {
 
             let exactKey = "\(entryTitle)|\(entryArtist)"
             if let exact = exactLookup[exactKey]?.first {
+                let versions = libraryVersions(for: entry, selectedTrack: exact, libraryTracks: libraryTracks)
+                matchedEntries.append(MatchedEntry(entry: entry, primaryTrack: exact, versions: versions))
                 if matchedIDs.insert(exact.id).inserted {
                     matched.append(exact)
                 }
@@ -129,6 +147,8 @@ public enum PlaylistMatchService {
                     }
                     return candidateArtist.contains(entryArtist) || entryArtist.contains(candidateArtist)
                 }) {
+                    let versions = libraryVersions(for: entry, selectedTrack: artistAligned, libraryTracks: libraryTracks)
+                    matchedEntries.append(MatchedEntry(entry: entry, primaryTrack: artistAligned, versions: versions))
                     if matchedIDs.insert(artistAligned.id).inserted {
                         matched.append(artistAligned)
                     }
@@ -136,6 +156,8 @@ public enum PlaylistMatchService {
                 }
 
                 if let first = titleCandidates.first {
+                    let versions = libraryVersions(for: entry, selectedTrack: first, libraryTracks: libraryTracks)
+                    matchedEntries.append(MatchedEntry(entry: entry, primaryTrack: first, versions: versions))
                     if matchedIDs.insert(first.id).inserted {
                         matched.append(first)
                     }
@@ -144,6 +166,8 @@ public enum PlaylistMatchService {
             }
 
             if let fuzzy = fuzzyFind(entry: entry, in: libraryTracks) {
+                let versions = libraryVersions(for: entry, selectedTrack: fuzzy, libraryTracks: libraryTracks)
+                matchedEntries.append(MatchedEntry(entry: entry, primaryTrack: fuzzy, versions: versions))
                 if matchedIDs.insert(fuzzy.id).inserted {
                     matched.append(fuzzy)
                 }
@@ -152,7 +176,60 @@ public enum PlaylistMatchService {
             }
         }
 
-        return MatchResult(matchedTracks: matched, planItems: plan)
+        return MatchResult(matchedEntries: matchedEntries, matchedTracks: matched, planItems: plan)
+    }
+
+    private static func libraryVersions(for entry: PlaylistEntry, selectedTrack: Track, libraryTracks: [Track]) -> [Track] {
+        let entryTitle = normalizedTitle(entry.title)
+        let selectedTitle = normalizedTitle(selectedTrack.title)
+        let targetTitle = entryTitle.isEmpty ? selectedTitle : entryTitle
+
+        let entryArtist = normalizedArtist(entry.artist)
+        let selectedArtist = normalizedArtist(selectedTrack.artist)
+        let targetArtist = entryArtist.isEmpty ? selectedArtist : entryArtist
+
+        let candidates = libraryTracks.filter { candidate in
+            let candidateTitle = normalizedTitle(candidate.title)
+            guard !candidateTitle.isEmpty else { return false }
+
+            let titleMatches =
+                candidateTitle == targetTitle ||
+                candidateTitle == selectedTitle ||
+                candidateTitle.contains(targetTitle) ||
+                targetTitle.contains(candidateTitle) ||
+                candidateTitle.contains(selectedTitle) ||
+                selectedTitle.contains(candidateTitle)
+            guard titleMatches else { return false }
+
+            let candidateArtist = normalizedArtist(candidate.artist)
+            if targetArtist.isEmpty || candidateArtist.isEmpty {
+                return true
+            }
+
+            return candidateArtist.contains(targetArtist) || targetArtist.contains(candidateArtist)
+        }
+
+        let deduped = uniqueTracksPreservingOrder(candidates)
+        return deduped.sorted {
+            let lhs = normalizedTitle($0.title)
+            let rhs = normalizedTitle($1.title)
+            if lhs == rhs {
+                return $0.title.localizedStandardCompare($1.title) == .orderedAscending
+            }
+            return lhs.localizedStandardCompare(rhs) == .orderedAscending
+        }
+    }
+
+    private static func uniqueTracksPreservingOrder(_ tracks: [Track]) -> [Track] {
+        var seen = Set<String>()
+        var output: [Track] = []
+        for track in tracks {
+            let key = track.seratoStoredPath
+            if seen.insert(key).inserted {
+                output.append(track)
+            }
+        }
+        return output
     }
 
     public static func createCrateFromMatches(
