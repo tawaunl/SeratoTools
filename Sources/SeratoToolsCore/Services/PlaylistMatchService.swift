@@ -739,7 +739,15 @@ public enum PlaylistMatchService {
 
     private static func normalizedTitle(_ value: String) -> String {
         normalized(value)
-            .replacingOccurrences(of: #"\b(original mix|extended mix|radio edit|clean|dirty|intro|outro|official)\b"#, with: " ", options: .regularExpression)
+            // Remove common "featuring" clauses embedded in titles.
+            .replacingOccurrences(of: #"\((feat|featuring|ft)\.?[^)]*\)"#, with: " ", options: .regularExpression)
+            .replacingOccurrences(of: #"\[(feat|featuring|ft)\.?[^\]]*\]"#, with: " ", options: .regularExpression)
+            .replacingOccurrences(of: #"\b(feat|featuring|ft)\.?\s+[a-z0-9\s&,'\-]+$"#, with: " ", options: .regularExpression)
+            .replacingOccurrences(
+                of: #"\b(original mix|extended mix|extended|radio edit|clean|dirty|intro|outro|official|club mix|vip mix|vip|bootleg|rework|remix|mixshow|short edit|long edit|intro edit|main mix|original|version)\b"#,
+                with: " ",
+                options: .regularExpression
+            )
             .replacingOccurrences(of: #"\s+"#, with: " ", options: .regularExpression)
             .trimmingCharacters(in: .whitespacesAndNewlines)
     }
@@ -747,6 +755,7 @@ public enum PlaylistMatchService {
     private static func normalizedArtist(_ value: String) -> String {
         normalized(value)
             .replacingOccurrences(of: #"\b(feat|featuring|ft)\.?\b"#, with: " ", options: .regularExpression)
+            .replacingOccurrences(of: #"\b(with|w|x|presents)\b"#, with: " ", options: .regularExpression)
             .replacingOccurrences(of: #"\s+"#, with: " ", options: .regularExpression)
             .trimmingCharacters(in: .whitespacesAndNewlines)
     }

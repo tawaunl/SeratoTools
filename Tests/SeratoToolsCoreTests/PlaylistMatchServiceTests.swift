@@ -82,6 +82,49 @@ import Testing
     #expect(result.matchedTracks.count == 1)
 }
 
+@Test func playlistMatchHandlesExtendedAndFeatureMarkersIncludingFtDot() {
+    let libraryTracks: [Track] = [
+        Track(
+            seratoStoredPath: "Music/Artist - Anthem Extended.mp3",
+            fileURL: URL(fileURLWithPath: "/tmp/Artist - Anthem Extended.mp3"),
+            title: "Anthem Extended",
+            artist: "Artist ft. Guest"
+        )
+    ]
+
+    let entries: [PlaylistMatchService.PlaylistEntry] = [
+        .init(title: "Anthem (Extended Mix)", artist: "Artist featuring Guest", sourceLine: "Artist featuring Guest - Anthem (Extended Mix)"),
+        .init(title: "Anthem ft. Guest", artist: "Artist", sourceLine: "Artist - Anthem ft. Guest")
+    ]
+
+    let result = PlaylistMatchService.match(entries: entries, libraryTracks: libraryTracks)
+
+    #expect(result.matchedEntries.count == 2)
+    #expect(result.planItems.isEmpty)
+}
+
+@Test func playlistMatchHandlesRemixAndVersionLabels() {
+    let libraryTracks: [Track] = [
+        Track(
+            seratoStoredPath: "Music/Producer - Banger.mp3",
+            fileURL: URL(fileURLWithPath: "/tmp/Producer - Banger.mp3"),
+            title: "Banger",
+            artist: "Producer"
+        )
+    ]
+
+    let entries: [PlaylistMatchService.PlaylistEntry] = [
+        .init(title: "Banger (VIP Mix)", artist: "Producer", sourceLine: "Producer - Banger (VIP Mix)"),
+        .init(title: "Banger - Club Mix", artist: "Producer", sourceLine: "Producer - Banger - Club Mix"),
+        .init(title: "Banger (Bootleg Rework)", artist: "Producer", sourceLine: "Producer - Banger (Bootleg Rework)")
+    ]
+
+    let result = PlaylistMatchService.match(entries: entries, libraryTracks: libraryTracks)
+
+    #expect(result.matchedEntries.count == 3)
+    #expect(result.planItems.isEmpty)
+}
+
 @Test func playlistMatchExtractsCanonicalSpotifyPlaylistURLFromCommonFormats() {
     let direct = PlaylistMatchService.spotifyPlaylistURL(from: "https://open.spotify.com/playlist/37i9dQZF1DX4SBhb3fqCJd?si=abc123")
     let embed = PlaylistMatchService.spotifyPlaylistURL(from: "https://open.spotify.com/embed/playlist/37i9dQZF1DX4SBhb3fqCJd")
