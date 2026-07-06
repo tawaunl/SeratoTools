@@ -34,6 +34,7 @@ struct AddMusicView: View {
     @State private var transferMode: AddMusicImportService.TransferMode = .move
     @State private var discoveredAudioCount = 0
     @State private var isRunning = false
+    @State private var isSyncingFolder = false
     @State private var errorMessage: String?
     @State private var successMessage: String?
 
@@ -150,6 +151,10 @@ struct AddMusicView: View {
                 Button("Browse...") {
                     chooseDestinationFolder()
                 }
+                Button(isSyncingFolder ? "Syncing..." : "Sync Folder To Serato DB") {
+                    syncDestinationFolderToSeratoLibrary()
+                }
+                .disabled(isRunning || isSyncingFolder)
             }
 
             HStack(spacing: 10) {
@@ -275,7 +280,7 @@ struct AddMusicView: View {
     }
 
     private var isImportDisabled: Bool {
-        isRunning || selectedInputURLs.isEmpty || discoveredAudioCount == 0 || !isCrateSelectionValid
+        isRunning || isSyncingFolder || selectedInputURLs.isEmpty || discoveredAudioCount == 0 || !isCrateSelectionValid
     }
 
     private func summaryTag(title: String, value: String, accent: Bool = false) -> some View {
@@ -417,6 +422,35 @@ struct AddMusicView: View {
             }
 
             isRunning = false
+        }
+    }
+
+    private func syncDestinationFolderToSeratoLibrary() {
+        let folderURL = destinationFolderURL
+        let databaseFileURL = libraryService.databaseFile
+        let rootDirectory = libraryService.rootDirectory
+
+        isSyncingFolder = true
+        errorMessage = nil
+        successMessage = nil
+
+        Task {
+            do {
+                let result = try await Task.detached(priority: .userInitiated) {
+                    try LibraryFolderSyncService.syncAudioFolder(
+                        folderURL,
+                        databaseFileURL: databaseFileURL,
+                        rootDirectory: rootDirectory
+                    )
+                }.value
+
+                successMessage = "Scanned \(result.scannedAudioFiles) files. Inserted \(result.insertedTracks), already in library \(result.alreadyPresentTracks)."
+                onLibraryChanged()
+            } catch {
+                errorMessage = error.localizedDescription
+            }
+
+            isSyncingFolder = false
         }
     }
 }

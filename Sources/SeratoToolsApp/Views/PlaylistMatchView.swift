@@ -3,7 +3,7 @@ import AppKit
 import SeratoToolsCore
 
 struct PlaylistMatchView: View {
-    private enum BulkVersionPreference: String, CaseIterable, Identifiable {
+    fileprivate enum BulkVersionPreference: String, CaseIterable, Identifiable {
         case auto
         case djOrder
         case intro
@@ -52,13 +52,18 @@ struct PlaylistMatchView: View {
 
     @State private var rawInput = ""
     @State private var crateName = "PlaylistMatch"
+    @State private var detectedPlaylistName: String?
+    @State private var parserDiagnostics: PlaylistMatchService.ParserDiagnostics?
     @State private var isRunning = false
     @State private var isCreatingCrate = false
     @State private var successMessage: String?
     @State private var errorMessage: String?
+    @State private var resolvedEntries: [PlaylistMatchService.PlaylistEntry] = []
     @State private var matchedEntries: [PlaylistMatchService.MatchedEntry] = []
+    @State private var includedMatchedEntryIDs: Set<UUID> = []
     @State private var selectedVersionByEntryID: [UUID: UUID] = [:]
     @State private var bulkVersionPreference: BulkVersionPreference = .auto
+    @State private var showOnlyUncheckedMatches = false
     @State private var matchedTracks: [Track] = []
     @State private var planItems: [PlaylistMatchService.PlanItem] = []
     @State private var resolvedEntryCount = 0
@@ -67,6 +72,13 @@ struct PlaylistMatchView: View {
     @State private var planStatusByID: [UUID: String] = [:]
     @State private var searchingPlanIDs: Set<UUID> = []
     @State private var youtubeSuggestionsByPlanID: [UUID: [YouTubeAudioImportService.SearchResult]] = [:]
+    @State private var hoveredSuggestionKey: String?
+    @State private var matchedYoutubeURLByEntryID: [UUID: String] = [:]
+    @State private var matchedStatusByEntryID: [UUID: String] = [:]
+    @State private var matchedSearchingEntryIDs: Set<UUID> = []
+    @State private var matchedRippingEntryIDs: Set<UUID> = []
+    @State private var matchedSuggestionsByEntryID: [UUID: [YouTubeAudioImportService.SearchResult]] = [:]
+    @State private var hoveredMatchedSuggestionKey: String?
 
     var body: some View {
         ScrollView {
@@ -82,6 +94,12 @@ struct PlaylistMatchView: View {
                 planCard
             }
             .padding(16)
+        }
+        .onAppear {
+            restoreCachedStateIfNeeded()
+        }
+        .onDisappear {
+            cacheCurrentState()
         }
     }
 
@@ -101,6 +119,30 @@ struct PlaylistMatchView: View {
             Text("Input examples: Spotify playlist URL, CSV with Title/Artist columns, or lines like 'Artist - Title'.")
                 .font(.footnote)
                 .foregroundStyle(.secondary)
+
+            if let detectedPlaylistName {
+                Text("Playlist: \(detectedPlaylistName)")
+                    .font(.footnote.weight(.semibold))
+                    .foregroundStyle(.secondary)
+            }
+
+            if let parserDiagnostics {
+                VStack(alignment: .leading, spacing: 3) {
+                    Text("Parser Diagnostics")
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(.secondary)
+                    Text("Source: \(parserDiagnostics.chosenSource)")
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                    Text("Counts - api: \(parserDiagnostics.apiEntriesCount), main: \(parserDiagnostics.htmlEntriesCount), embed: \(parserDiagnostics.embedEntriesCount), chosen: \(parserDiagnostics.chosenEntriesCount)")
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                    Text("Rows with artist in chosen set: \(parserDiagnostics.chosenRowsWithArtistCount)")
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                }
+                .padding(.top, 2)
+            }
 
             HStack(spacing: 10) {
                 TextField("Crate name", text: $crateName)
@@ -154,6 +196,7 @@ struct PlaylistMatchView: View {
             HStack(spacing: 10) {
                 statTag(title: "Playlist Tracks", value: "\(resolvedEntryCount)")
                 statTag(title: "Matched Songs", value: "\(matchedEntries.count)", accent: true)
+                statTag(title: "Chosen Songs", value: "\(includedMatchedEntryIDs.count)")
                 statTag(title: "Selected Tracks", value: "\(matchedTracks.count)")
                 statTag(title: "Plan", value: "\(planItems.count)")
                 Spacer(minLength: 0)
@@ -178,12 +221,39 @@ struct PlaylistMatchView: View {
                 }
                 .disabled(matchedEntries.isEmpty)
 
+                Button("Select All") {
+                    includedMatchedEntryIDs = Set(matchedEntries.map { $0.entry.id })
+                    matchedTracks = selectedMatchedTracks(from: matchedEntries)
+                }
+                .disabled(matchedEntries.isEmpty)
+
+                Button("Select None") {
+                    includedMatchedEntryIDs.removeAll()
+                    matchedTracks = []
+                }
+                .disabled(matchedEntries.isEmpty)
+
+                Toggle("Show Unchecked Only", isOn: $showOnlyUncheckedMatches)
+                    .toggleStyle(.switch)
+                    .controlSize(.small)
+                    .disabled(matchedEntries.isEmpty)
+
                 Spacer(minLength: 0)
             }
 
             if !matchedEntries.isEmpty {
-                VStack(alignment: .leading, spacing: 4) {
-                    ForEach(Array(matchedEntries.prefix(20))) { item in
+                let visibleEntries = showOnlyUncheckedMatches
+                    ? matchedEntries.filter { !includedMatchedEntryIDs.contains($0.entry.id) }
+                    : matchedEntries
+
+                if visibleEntries.isEmpty {
+                    Text("All matched songs are currently included.")
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                        .padding(.top, 4)
+                } else {
+                    VStack(alignment: .leading, spacing: 4) {
+                        ForEach(Array(visibleEntries.prefix(20))) { item in
                         VStack(alignment: .leading, spacing: 4) {
                             let artist = item.entry.artist.isEmpty ? "Unknown Artist" : item.entry.artist
                             Text("• \(artist) - \(item.entry.title)")
@@ -207,6 +277,12 @@ struct PlaylistMatchView: View {
                                 Text(item.reason.displayName)
                                     .font(.caption)
                                     .foregroundStyle(.secondary)
+
+                                Spacer(minLength: 0)
+
+                                Toggle("Include", isOn: includeBinding(for: item))
+                                    .toggleStyle(.switch)
+                                    .controlSize(.small)
                             }
 
                             Picker(
@@ -220,6 +296,118 @@ struct PlaylistMatchView: View {
                             }
                             .pickerStyle(.menu)
                             .frame(maxWidth: 440, alignment: .leading)
+
+                            if !includedMatchedEntryIDs.contains(item.entry.id) {
+                                VStack(alignment: .leading, spacing: 8) {
+                                    Text("Unchecked match: search and link a YouTube source if you want to add a new rip instead.")
+                                        .font(.caption)
+                                        .foregroundStyle(.secondary)
+
+                                    HStack(spacing: 8) {
+                                        TextField(
+                                            "Paste YouTube URL",
+                                            text: Binding(
+                                                get: { matchedYoutubeURLByEntryID[item.entry.id] ?? "" },
+                                                set: { matchedYoutubeURLByEntryID[item.entry.id] = $0 }
+                                            )
+                                        )
+                                        .textFieldStyle(.roundedBorder)
+
+                                        Button(matchedSearchingEntryIDs.contains(item.entry.id) ? "Finding..." : "Find In-App") {
+                                            searchYouTubeSuggestions(for: item.entry)
+                                        }
+                                        .disabled(matchedSearchingEntryIDs.contains(item.entry.id))
+
+                                        Button("Search YouTube") {
+                                            openYouTubeSearch(for: item.entry)
+                                        }
+
+                                        Button(matchedRippingEntryIDs.contains(item.entry.id) ? "Ripping..." : "Rip + Add") {
+                                            ripMatchedEntryFromYouTube(item.entry)
+                                        }
+                                        .disabled(matchedRippingEntryIDs.contains(item.entry.id))
+                                    }
+
+                                    if let suggestions = matchedSuggestionsByEntryID[item.entry.id], !suggestions.isEmpty {
+                                        VStack(alignment: .leading, spacing: 6) {
+                                            Text("Suggestions")
+                                                .font(.caption.weight(.semibold))
+                                                .foregroundStyle(.secondary)
+
+                                            ForEach(Array(suggestions.prefix(5))) { suggestion in
+                                                let isHovered = hoveredMatchedSuggestionKey == matchedSuggestionRowKey(entryID: item.entry.id, suggestionID: suggestion.id)
+                                                HStack(alignment: .top, spacing: 8) {
+                                                    VStack(alignment: .leading, spacing: 2) {
+                                                        Text(suggestion.title)
+                                                            .font(.caption)
+                                                            .lineLimit(1)
+                                                        Text(suggestion.channel)
+                                                            .font(.caption2)
+                                                            .foregroundStyle(.secondary)
+                                                    }
+
+                                                    Spacer(minLength: 0)
+
+                                                    HStack(spacing: 6) {
+                                                        Button("Use Link") {
+                                                            matchedYoutubeURLByEntryID[item.entry.id] = suggestion.webpageURL.absoluteString
+                                                        }
+                                                        .buttonStyle(.bordered)
+                                                        .controlSize(.small)
+
+                                                        Button(matchedRippingEntryIDs.contains(item.entry.id) ? "Ripping..." : "Use + Rip") {
+                                                            ripMatchedEntryFromYouTube(item.entry, preferredURL: suggestion.webpageURL)
+                                                        }
+                                                        .buttonStyle(.borderedProminent)
+                                                        .controlSize(.small)
+                                                        .disabled(matchedRippingEntryIDs.contains(item.entry.id))
+                                                    }
+                                                    .padding(.horizontal, 6)
+                                                    .padding(.vertical, 5)
+                                                    .background(
+                                                        RoundedRectangle(cornerRadius: 8)
+                                                            .fill(Color(nsColor: .windowBackgroundColor).opacity(0.9))
+                                                    )
+                                                    .overlay(
+                                                        RoundedRectangle(cornerRadius: 8)
+                                                            .stroke(Color.secondary.opacity(0.2), lineWidth: 1)
+                                                    )
+                                                }
+                                                .padding(.horizontal, 8)
+                                                .padding(.vertical, 7)
+                                                .background(
+                                                    RoundedRectangle(cornerRadius: 8)
+                                                        .fill(Color.accentColor.opacity(isHovered ? 0.18 : 0.08))
+                                                )
+                                                .overlay(
+                                                    RoundedRectangle(cornerRadius: 8)
+                                                        .stroke(Color.accentColor.opacity(isHovered ? 0.42 : 0.22), lineWidth: 1)
+                                                )
+                                                .onHover { hovering in
+                                                    let key = matchedSuggestionRowKey(entryID: item.entry.id, suggestionID: suggestion.id)
+                                                    hoveredMatchedSuggestionKey = hovering ? key : (hoveredMatchedSuggestionKey == key ? nil : hoveredMatchedSuggestionKey)
+                                                }
+                                            }
+                                        }
+                                        .padding(8)
+                                        .background(
+                                            RoundedRectangle(cornerRadius: 8)
+                                                .fill(Color(nsColor: .windowBackgroundColor).opacity(0.5))
+                                        )
+                                    }
+
+                                    if let status = matchedStatusByEntryID[item.entry.id] {
+                                        Text(status)
+                                            .font(.caption)
+                                            .foregroundStyle(.secondary)
+                                    }
+                                }
+                                .padding(8)
+                                .background(
+                                    RoundedRectangle(cornerRadius: 8)
+                                        .fill(Color(nsColor: .windowBackgroundColor).opacity(0.45))
+                                )
+                            }
 
                             VStack(alignment: .leading, spacing: 2) {
                                 ForEach(Array(item.versions.prefix(6)), id: \.id) { version in
@@ -245,15 +433,16 @@ struct PlaylistMatchView: View {
                             }
                         }
                         .padding(.vertical, 4)
-                    }
+                        }
 
-                    if matchedEntries.count > 20 {
-                        Text("+ \(matchedEntries.count - 20) more matched songs")
-                            .font(.footnote)
-                            .foregroundStyle(.secondary)
+                        if visibleEntries.count > 20 {
+                            Text("+ \(visibleEntries.count - 20) more matched songs")
+                                .font(.footnote)
+                                .foregroundStyle(.secondary)
+                        }
                     }
+                    .padding(.top, 4)
                 }
-                .padding(.top, 4)
             }
         }
         .padding(16)
@@ -315,6 +504,7 @@ struct PlaylistMatchView: View {
                                     .foregroundStyle(.secondary)
 
                                 ForEach(Array(suggestions.prefix(5))) { suggestion in
+                                    let isHovered = hoveredSuggestionKey == suggestionRowKey(planID: item.id, suggestionID: suggestion.id)
                                     HStack(alignment: .top, spacing: 8) {
                                         VStack(alignment: .leading, spacing: 2) {
                                             Text(suggestion.title)
@@ -327,18 +517,44 @@ struct PlaylistMatchView: View {
 
                                         Spacer(minLength: 0)
 
-                                        Button("Use Link") {
-                                            youtubeURLByPlanID[item.id] = suggestion.webpageURL.absoluteString
-                                        }
-                                        .buttonStyle(.bordered)
-                                        .controlSize(.small)
+                                        HStack(spacing: 6) {
+                                            Button("Use Link") {
+                                                youtubeURLByPlanID[item.id] = suggestion.webpageURL.absoluteString
+                                            }
+                                            .buttonStyle(.bordered)
+                                            .controlSize(.small)
 
-                                        Button(rippingPlanIDs.contains(item.id) ? "Ripping..." : "Use + Rip") {
-                                            ripPlanItemFromYouTube(item, preferredURL: suggestion.webpageURL)
+                                            Button(rippingPlanIDs.contains(item.id) ? "Ripping..." : "Use + Rip") {
+                                                ripPlanItemFromYouTube(item, preferredURL: suggestion.webpageURL)
+                                            }
+                                            .buttonStyle(.borderedProminent)
+                                            .controlSize(.small)
+                                            .disabled(rippingPlanIDs.contains(item.id))
                                         }
-                                        .buttonStyle(.borderedProminent)
-                                        .controlSize(.small)
-                                        .disabled(rippingPlanIDs.contains(item.id))
+                                        .padding(.horizontal, 6)
+                                        .padding(.vertical, 5)
+                                        .background(
+                                            RoundedRectangle(cornerRadius: 8)
+                                                .fill(Color(nsColor: .windowBackgroundColor).opacity(0.9))
+                                        )
+                                        .overlay(
+                                            RoundedRectangle(cornerRadius: 8)
+                                                .stroke(Color.secondary.opacity(0.2), lineWidth: 1)
+                                        )
+                                    }
+                                    .padding(.horizontal, 8)
+                                    .padding(.vertical, 7)
+                                    .background(
+                                        RoundedRectangle(cornerRadius: 8)
+                                            .fill(Color.accentColor.opacity(isHovered ? 0.18 : 0.08))
+                                    )
+                                    .overlay(
+                                        RoundedRectangle(cornerRadius: 8)
+                                            .stroke(Color.accentColor.opacity(isHovered ? 0.42 : 0.22), lineWidth: 1)
+                                    )
+                                    .onHover { hovering in
+                                        let key = suggestionRowKey(planID: item.id, suggestionID: suggestion.id)
+                                        hoveredSuggestionKey = hovering ? key : (hoveredSuggestionKey == key ? nil : hoveredSuggestionKey)
                                     }
                                 }
                             }
@@ -355,7 +571,16 @@ struct PlaylistMatchView: View {
                                 .foregroundStyle(.secondary)
                         }
                     }
-                    .padding(.vertical, 6)
+                    .padding(10)
+                    .background(
+                        RoundedRectangle(cornerRadius: 10)
+                            .fill(Color(nsColor: .windowBackgroundColor).opacity(0.62))
+                    )
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 10)
+                            .stroke(Color.secondary.opacity(0.18), lineWidth: 1)
+                    )
+                    .padding(.vertical, 4)
                 }
             }
         }
@@ -386,18 +611,38 @@ struct PlaylistMatchView: View {
     }
 
     private func clearResults() {
+        resolvedEntries = []
         resolvedEntryCount = 0
         matchedEntries = []
+        includedMatchedEntryIDs = []
         selectedVersionByEntryID = [:]
+        showOnlyUncheckedMatches = false
         matchedTracks = []
         planItems = []
+        detectedPlaylistName = nil
+        parserDiagnostics = nil
         youtubeURLByPlanID = [:]
         rippingPlanIDs = []
         planStatusByID = [:]
         searchingPlanIDs = []
         youtubeSuggestionsByPlanID = [:]
+        hoveredSuggestionKey = nil
+        matchedYoutubeURLByEntryID = [:]
+        matchedStatusByEntryID = [:]
+        matchedSearchingEntryIDs = []
+        matchedRippingEntryIDs = []
+        matchedSuggestionsByEntryID = [:]
+        hoveredMatchedSuggestionKey = nil
         successMessage = nil
         errorMessage = nil
+    }
+
+    private func suggestionRowKey(planID: UUID, suggestionID: String) -> String {
+        "\(planID.uuidString)|\(suggestionID)"
+    }
+
+    private func matchedSuggestionRowKey(entryID: UUID, suggestionID: String) -> String {
+        "\(entryID.uuidString)|\(suggestionID)"
     }
 
     private func confidenceColor(_ confidence: PlaylistMatchService.MatchConfidence) -> Color {
@@ -421,10 +666,14 @@ struct PlaylistMatchView: View {
 
         Task {
             do {
-                let entries = try await PlaylistMatchService.resolveEntries(from: input)
-                let result = PlaylistMatchService.match(entries: entries, libraryTracks: libraryTracks)
-                resolvedEntryCount = entries.count
+                let resolved = try await PlaylistMatchService.resolvePlaylist(from: input)
+                let result = PlaylistMatchService.match(entries: resolved.entries, libraryTracks: libraryTracks)
+                resolvedEntries = resolved.entries
+                resolvedEntryCount = resolved.entries.count
+                detectedPlaylistName = resolved.playlistName
+                parserDiagnostics = resolved.diagnostics
                 matchedEntries = result.matchedEntries
+                includedMatchedEntryIDs = Set(result.matchedEntries.map { $0.entry.id })
                 selectedVersionByEntryID = Dictionary(
                     uniqueKeysWithValues: result.matchedEntries.map { ($0.entry.id, $0.primaryTrack.id) }
                 )
@@ -433,6 +682,15 @@ struct PlaylistMatchView: View {
                 youtubeURLByPlanID = Dictionary(uniqueKeysWithValues: result.planItems.map { ($0.id, "") })
                 planStatusByID = [:]
                 youtubeSuggestionsByPlanID = [:]
+                matchedYoutubeURLByEntryID = [:]
+                matchedStatusByEntryID = [:]
+                matchedSearchingEntryIDs = []
+                matchedRippingEntryIDs = []
+                matchedSuggestionsByEntryID = [:]
+                if let playlistName = resolved.playlistName,
+                   (crateName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || crateName == "PlaylistMatch") {
+                    crateName = playlistName
+                }
                 successMessage = "Matched \(result.matchedEntries.count) songs. Added \(result.planItems.count) to Plan."
             } catch {
                 errorMessage = error.localizedDescription
@@ -448,13 +706,9 @@ struct PlaylistMatchView: View {
         errorMessage = nil
 
         do {
-            let crateURL = try PlaylistMatchService.createCrateFromMatches(
-                crateName: crateName,
-                matchedTracks: matchedTracks,
-                subcratesDirectory: libraryService.subcratesDirectory
-            )
+            let crateURL = try upsertTargetCrateFromCurrentSelection()
             onLibraryChanged()
-            successMessage = "Created crate \(crateURL.deletingPathExtension().lastPathComponent) with \(matchedTracks.count) tracks."
+            successMessage = "Updated crate \(crateURL.deletingPathExtension().lastPathComponent) with \(matchedTracks.count) selected playlist tracks in order."
         } catch {
             errorMessage = error.localizedDescription
         }
@@ -476,11 +730,26 @@ struct PlaylistMatchView: View {
         )
     }
 
+    private func includeBinding(for item: PlaylistMatchService.MatchedEntry) -> Binding<Bool> {
+        Binding(
+            get: { includedMatchedEntryIDs.contains(item.entry.id) },
+            set: { included in
+                if included {
+                    includedMatchedEntryIDs.insert(item.entry.id)
+                } else {
+                    includedMatchedEntryIDs.remove(item.entry.id)
+                }
+                matchedTracks = selectedMatchedTracks(from: matchedEntries)
+            }
+        )
+    }
+
     private func selectedMatchedTracks(from entries: [PlaylistMatchService.MatchedEntry]) -> [Track] {
         var output: [Track] = []
         var seen = Set<String>()
 
         for entry in entries {
+            guard includedMatchedEntryIDs.contains(entry.entry.id) else { continue }
             let selectedTrackID = selectedVersionByEntryID[entry.entry.id] ?? entry.primaryTrack.id
             let selectedTrack = entry.versions.first(where: { $0.id == selectedTrackID }) ?? entry.primaryTrack
             if seen.insert(selectedTrack.seratoStoredPath).inserted {
@@ -679,6 +948,40 @@ struct PlaylistMatchView: View {
         }
     }
 
+    private func searchYouTubeSuggestions(for entry: PlaylistMatchService.PlaylistEntry) {
+        let query = [entry.artist, entry.title]
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
+            .joined(separator: " ")
+
+        guard !query.isEmpty else {
+            matchedStatusByEntryID[entry.id] = "Missing title/artist for search query."
+            return
+        }
+
+        matchedSearchingEntryIDs.insert(entry.id)
+        matchedStatusByEntryID[entry.id] = "Searching YouTube..."
+
+        Task {
+            do {
+                let suggestions = try await Task.detached(priority: .userInitiated) {
+                    try YouTubeAudioImportService.searchVideos(query: query, maxResults: 5)
+                }.value
+
+                matchedSuggestionsByEntryID[entry.id] = suggestions
+                if suggestions.isEmpty {
+                    matchedStatusByEntryID[entry.id] = "No suggestions found."
+                } else {
+                    matchedStatusByEntryID[entry.id] = "Found \(suggestions.count) suggestions."
+                }
+            } catch {
+                matchedStatusByEntryID[entry.id] = "Search failed: \(error.localizedDescription)"
+            }
+
+            matchedSearchingEntryIDs.remove(entry.id)
+        }
+    }
+
     private func ripPlanItemFromYouTube(_ item: PlaylistMatchService.PlanItem, preferredURL: URL? = nil) {
         let selectedURL: URL?
         if let preferredURL {
@@ -705,24 +1008,20 @@ struct PlaylistMatchView: View {
         rippingPlanIDs.insert(item.id)
         planStatusByID[item.id] = "Downloading from YouTube..."
 
-        let destinationFolderURL = FileManager.default.homeDirectoryForCurrentUser
-            .appendingPathComponent("Music", isDirectory: true)
+        let destinationFolderURL = preferredRipDestinationFolder()
 
-        let metadata = SeratoTrackMetadataUpdate(
-            title: item.entry.title,
-            artist: item.entry.artist,
-            album: "",
-            genre: "",
-            comment: videoURL.absoluteString,
-            key: "",
-            bpm: nil,
-            year: nil
-        )
+        let metadata = metadataForPlaylistEntry(item.entry, sourceVideoURL: videoURL)
 
         Task {
             do {
                 let crate = try resolveOrCreateTargetCrate()
                 let rootDirectory = libraryService.rootDirectory
+                let databaseFileURL = libraryService.databaseFile
+
+                try FileManager.default.createDirectory(
+                    at: destinationFolderURL,
+                    withIntermediateDirectories: true
+                )
 
                 let outputFileURL = try await Task.detached(priority: .userInitiated) {
                     let download = try YouTubeAudioImportService.downloadAudio(
@@ -736,6 +1035,13 @@ struct PlaylistMatchView: View {
                         )
                     )
 
+                    try writeDownloadedTrackToSeratoDatabase(
+                        fileURL: download.outputFileURL,
+                        rootDirectory: rootDirectory,
+                        databaseFileURL: databaseFileURL,
+                        metadata: metadata
+                    )
+
                     _ = try AddMusicImportService.appendAudioFiles(
                         [download.outputFileURL],
                         toExistingCrate: crate,
@@ -746,16 +1052,98 @@ struct PlaylistMatchView: View {
                 }.value
 
                 onLibraryChanged()
-                planItems.removeAll { $0.id == item.id }
-                youtubeURLByPlanID[item.id] = ""
+                refreshMatchAfterRip(removing: item)
+                try? alignTargetCrateToCurrentSelectionOrder()
                 planStatusByID[item.id] = "Downloaded \(outputFileURL.lastPathComponent) and added to crate."
-                successMessage = "Downloaded \(outputFileURL.lastPathComponent) and added it to \(targetCrateName)."
+                successMessage = "Downloaded \(outputFileURL.lastPathComponent) and added it to \(targetCrateName). Matched: \(matchedEntries.count), Plan: \(planItems.count)."
             } catch {
                 errorMessage = error.localizedDescription
                 planStatusByID[item.id] = "Failed: \(error.localizedDescription)"
             }
 
             rippingPlanIDs.remove(item.id)
+        }
+    }
+
+    private func ripMatchedEntryFromYouTube(_ entry: PlaylistMatchService.PlaylistEntry, preferredURL: URL? = nil) {
+        let selectedURL: URL?
+        if let preferredURL {
+            selectedURL = preferredURL
+            matchedYoutubeURLByEntryID[entry.id] = preferredURL.absoluteString
+        } else {
+            let rawURL = matchedYoutubeURLByEntryID[entry.id]?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+            selectedURL = YouTubeBatchLinkImportService.parseVideoURLs(from: rawURL).first
+        }
+
+        guard let videoURL = selectedURL else {
+            errorMessage = PlaylistMatchRipError.invalidYouTubeURL.localizedDescription
+            return
+        }
+
+        let dependencyStatus = YouTubeAudioImportService.dependencyStatus()
+        guard dependencyStatus.isReady else {
+            errorMessage = PlaylistMatchRipError.dependenciesMissing.localizedDescription
+            return
+        }
+
+        errorMessage = nil
+        successMessage = nil
+        matchedRippingEntryIDs.insert(entry.id)
+        matchedStatusByEntryID[entry.id] = "Downloading from YouTube..."
+
+        let destinationFolderURL = preferredRipDestinationFolder()
+        let metadata = metadataForPlaylistEntry(entry, sourceVideoURL: videoURL)
+
+        Task {
+            do {
+                let crate = try resolveOrCreateTargetCrate()
+                let rootDirectory = libraryService.rootDirectory
+                let databaseFileURL = libraryService.databaseFile
+
+                try FileManager.default.createDirectory(
+                    at: destinationFolderURL,
+                    withIntermediateDirectories: true
+                )
+
+                let outputFileURL = try await Task.detached(priority: .userInitiated) {
+                    let download = try YouTubeAudioImportService.downloadAudio(
+                        .init(
+                            videoURL: videoURL,
+                            destinationFolderURL: destinationFolderURL,
+                            audioFormat: .mp3,
+                            audioQuality: .high,
+                            audioBitrateKbps: 320,
+                            metadata: metadata
+                        )
+                    )
+
+                    try writeDownloadedTrackToSeratoDatabase(
+                        fileURL: download.outputFileURL,
+                        rootDirectory: rootDirectory,
+                        databaseFileURL: databaseFileURL,
+                        metadata: metadata
+                    )
+
+                    _ = try AddMusicImportService.appendAudioFiles(
+                        [download.outputFileURL],
+                        toExistingCrate: crate,
+                        rootDirectory: rootDirectory
+                    )
+
+                    return download.outputFileURL
+                }.value
+
+                onLibraryChanged()
+                refreshMatchAfterMatchedRip(entryID: entry.id, downloadedFileURL: outputFileURL)
+                try? alignTargetCrateToCurrentSelectionOrder()
+                matchedStatusByEntryID[entry.id] = "Downloaded \(outputFileURL.lastPathComponent) and added to crate."
+                successMessage = "Downloaded \(outputFileURL.lastPathComponent) and added it to \(targetCrateName)."
+            } catch {
+                errorMessage = error.localizedDescription
+                matchedStatusByEntryID[entry.id] = "Failed: \(error.localizedDescription)"
+            }
+
+            matchedRippingEntryIDs.remove(entry.id)
         }
     }
 
@@ -809,11 +1197,7 @@ struct PlaylistMatchView: View {
             throw PlaylistMatchRipError.targetCrateMissing
         }
 
-        _ = try PlaylistMatchService.createCrateFromMatches(
-            crateName: targetCrateName,
-            matchedTracks: selectedMatchedTracks(from: matchedEntries),
-            subcratesDirectory: libraryService.subcratesDirectory
-        )
+        _ = try upsertTargetCrateFromCurrentSelection()
         onLibraryChanged()
 
         if let created = libraryService.crates.first(where: { $0.name == targetCrateName }) {
@@ -821,6 +1205,332 @@ struct PlaylistMatchView: View {
         }
 
         throw PlaylistMatchRipError.targetCrateMissing
+    }
+
+    private func refreshMatchAfterRip(removing item: PlaylistMatchService.PlanItem) {
+        guard !resolvedEntries.isEmpty else {
+            // Loaded plans can exist without source playlist context.
+            planItems.removeAll { $0.id == item.id }
+            youtubeURLByPlanID[item.id] = ""
+            youtubeSuggestionsByPlanID[item.id] = nil
+            return
+        }
+
+        do {
+            let latestLibraryTracks = try SeratoDatabaseParser.parseTracks(
+                at: libraryService.databaseFile,
+                rootDirectory: libraryService.rootDirectory
+            )
+            let result = PlaylistMatchService.match(entries: resolvedEntries, libraryTracks: latestLibraryTracks)
+
+            let previousSelection = selectedVersionByEntryID
+            let previousMatchedIDs = Set(matchedEntries.map { $0.entry.id })
+            let previousIncluded = includedMatchedEntryIDs
+            matchedEntries = result.matchedEntries
+            includedMatchedEntryIDs = Set(result.matchedEntries.compactMap { entry in
+                if previousMatchedIDs.contains(entry.entry.id) {
+                    return previousIncluded.contains(entry.entry.id) ? entry.entry.id : nil
+                }
+                return entry.entry.id
+            })
+            selectedVersionByEntryID = Dictionary(
+                uniqueKeysWithValues: result.matchedEntries.map { entry in
+                    let previous = previousSelection[entry.entry.id]
+                    let selected = entry.versions.first(where: { $0.id == previous })?.id ?? entry.primaryTrack.id
+                    return (entry.entry.id, selected)
+                }
+            )
+            matchedTracks = selectedMatchedTracks(from: result.matchedEntries)
+            planItems = result.planItems
+            resolvedEntryCount = resolvedEntries.count
+
+            let remainingPlanIDs = Set(result.planItems.map(\.id))
+            youtubeURLByPlanID = Dictionary(uniqueKeysWithValues: result.planItems.map { plan in
+                (plan.id, youtubeURLByPlanID[plan.id] ?? "")
+            })
+            planStatusByID = planStatusByID.filter { remainingPlanIDs.contains($0.key) }
+            youtubeSuggestionsByPlanID = youtubeSuggestionsByPlanID.filter { remainingPlanIDs.contains($0.key) }
+        } catch {
+            // Keep the rip flow successful even if immediate re-parse fails.
+            planItems.removeAll { $0.id == item.id }
+            youtubeURLByPlanID[item.id] = ""
+            youtubeSuggestionsByPlanID[item.id] = nil
+        }
+    }
+
+    private func refreshMatchAfterMatchedRip(entryID: UUID, downloadedFileURL: URL) {
+        guard !resolvedEntries.isEmpty else { return }
+
+        do {
+            let latestLibraryTracks = try SeratoDatabaseParser.parseTracks(
+                at: libraryService.databaseFile,
+                rootDirectory: libraryService.rootDirectory
+            )
+            let result = PlaylistMatchService.match(entries: resolvedEntries, libraryTracks: latestLibraryTracks)
+
+            let previousSelection = selectedVersionByEntryID
+            let previousMatchedIDs = Set(matchedEntries.map { $0.entry.id })
+            let previousIncluded = includedMatchedEntryIDs
+            matchedEntries = result.matchedEntries
+            includedMatchedEntryIDs = Set(result.matchedEntries.compactMap { entry in
+                if entry.entry.id == entryID {
+                    return entry.entry.id
+                }
+                if previousMatchedIDs.contains(entry.entry.id) {
+                    return previousIncluded.contains(entry.entry.id) ? entry.entry.id : nil
+                }
+                return entry.entry.id
+            })
+            selectedVersionByEntryID = Dictionary(
+                uniqueKeysWithValues: result.matchedEntries.map { entry in
+                    if entry.entry.id == entryID,
+                       let downloaded = entry.versions.first(where: { pathsEquivalent($0.fileURL, downloadedFileURL) }) {
+                        return (entry.entry.id, downloaded.id)
+                    }
+
+                    let previous = previousSelection[entry.entry.id]
+                    let selected = entry.versions.first(where: { $0.id == previous })?.id ?? entry.primaryTrack.id
+                    return (entry.entry.id, selected)
+                }
+            )
+            matchedTracks = selectedMatchedTracks(from: result.matchedEntries)
+            planItems = result.planItems
+            resolvedEntryCount = resolvedEntries.count
+
+            let remainingPlanIDs = Set(result.planItems.map(\.id))
+            youtubeURLByPlanID = Dictionary(uniqueKeysWithValues: result.planItems.map { plan in
+                (plan.id, youtubeURLByPlanID[plan.id] ?? "")
+            })
+            planStatusByID = planStatusByID.filter { remainingPlanIDs.contains($0.key) }
+            youtubeSuggestionsByPlanID = youtubeSuggestionsByPlanID.filter { remainingPlanIDs.contains($0.key) }
+        } catch {
+            matchedStatusByEntryID[entryID] = "Added track, but refresh failed: \(error.localizedDescription)"
+        }
+    }
+
+    private func metadataForPlaylistEntry(_ entry: PlaylistMatchService.PlaylistEntry, sourceVideoURL: URL) -> SeratoTrackMetadataUpdate {
+        SeratoTrackMetadataUpdate(
+            title: entry.title,
+            artist: entry.artist,
+            album: "",
+            genre: "",
+            comment: sourceVideoURL.absoluteString,
+            key: "",
+            bpm: nil,
+            year: nil
+        )
+    }
+
+    private func pathsEquivalent(_ lhs: URL, _ rhs: URL) -> Bool {
+        canonicalPath(lhs) == canonicalPath(rhs)
+    }
+
+    private func canonicalPath(_ fileURL: URL) -> String {
+        var path = fileURL.resolvingSymlinksInPath().standardizedFileURL.path
+        if path.hasPrefix("/private/") {
+            path.removeFirst("/private".count)
+        }
+        return path
+    }
+
+    private func cacheCurrentState() {
+        PlaylistMatchInMemoryCache.state = CachedState(
+            rawInput: rawInput,
+            crateName: crateName,
+            detectedPlaylistName: detectedPlaylistName,
+            parserDiagnostics: parserDiagnostics,
+            successMessage: successMessage,
+            errorMessage: errorMessage,
+            resolvedEntries: resolvedEntries,
+            matchedEntries: matchedEntries,
+            includedMatchedEntryIDs: includedMatchedEntryIDs,
+            selectedVersionByEntryID: selectedVersionByEntryID,
+            bulkVersionPreference: bulkVersionPreference,
+            showOnlyUncheckedMatches: showOnlyUncheckedMatches,
+            matchedTracks: matchedTracks,
+            planItems: planItems,
+            resolvedEntryCount: resolvedEntryCount,
+            youtubeURLByPlanID: youtubeURLByPlanID,
+            planStatusByID: planStatusByID,
+            youtubeSuggestionsByPlanID: youtubeSuggestionsByPlanID,
+            matchedYoutubeURLByEntryID: matchedYoutubeURLByEntryID,
+            matchedStatusByEntryID: matchedStatusByEntryID,
+            matchedSuggestionsByEntryID: matchedSuggestionsByEntryID
+        )
+    }
+
+    private func restoreCachedStateIfNeeded() {
+        guard let cached = PlaylistMatchInMemoryCache.state else { return }
+
+        rawInput = cached.rawInput
+        crateName = cached.crateName
+        detectedPlaylistName = cached.detectedPlaylistName
+        parserDiagnostics = cached.parserDiagnostics
+        successMessage = cached.successMessage
+        errorMessage = cached.errorMessage
+        resolvedEntries = cached.resolvedEntries
+        matchedEntries = cached.matchedEntries
+        includedMatchedEntryIDs = cached.includedMatchedEntryIDs
+        selectedVersionByEntryID = cached.selectedVersionByEntryID
+        bulkVersionPreference = cached.bulkVersionPreference
+        showOnlyUncheckedMatches = cached.showOnlyUncheckedMatches
+        matchedTracks = cached.matchedTracks
+        planItems = cached.planItems
+        resolvedEntryCount = cached.resolvedEntryCount
+        youtubeURLByPlanID = cached.youtubeURLByPlanID
+        planStatusByID = cached.planStatusByID
+        youtubeSuggestionsByPlanID = cached.youtubeSuggestionsByPlanID
+        matchedYoutubeURLByEntryID = cached.matchedYoutubeURLByEntryID
+        matchedStatusByEntryID = cached.matchedStatusByEntryID
+        matchedSuggestionsByEntryID = cached.matchedSuggestionsByEntryID
+    }
+
+    private func upsertTargetCrateFromCurrentSelection() throws -> URL {
+        let orderedSelectedPaths = orderedSelectedStoredPaths()
+        guard !orderedSelectedPaths.isEmpty else {
+            throw PlaylistMatchService.MatchError.noMatchedTracks
+        }
+
+        if let existing = libraryService.crates.first(where: { $0.name == targetCrateName }),
+           existing.fileURL?.pathExtension.lowercased() == "crate" {
+            let mergedPaths = mergedCratePathsPreservingPlaylistOrder(
+                existing: existing.trackPaths,
+                orderedSelected: orderedSelectedPaths
+            )
+            _ = try SeratoCrateEditor.rewriteTrackPaths(in: existing, to: mergedPaths)
+            return existing.fileURL ?? crateFileURL(for: targetCrateName)
+        }
+
+        return try PlaylistMatchService.createCrateFromMatches(
+            crateName: targetCrateName,
+            matchedTracks: matchedTracks,
+            subcratesDirectory: libraryService.subcratesDirectory
+        )
+    }
+
+    private func alignTargetCrateToCurrentSelectionOrder() throws {
+        let crateURL = crateFileURL(for: targetCrateName)
+        guard FileManager.default.fileExists(atPath: crateURL.path) else { return }
+
+        let parsed = try SeratoCrateParser.parseCrate(at: crateURL)
+        let orderedSelectedPaths = orderedSelectedStoredPaths()
+        guard !orderedSelectedPaths.isEmpty else { return }
+
+        let mergedPaths = mergedCratePathsPreservingPlaylistOrder(
+            existing: parsed.trackPaths,
+            orderedSelected: orderedSelectedPaths
+        )
+
+        _ = try SeratoCrateEditor.rewriteTrackPaths(in: parsed, to: mergedPaths)
+    }
+
+    private func orderedSelectedStoredPaths() -> [String] {
+        var output: [String] = []
+        var seen = Set<String>()
+
+        for entry in matchedEntries {
+            guard includedMatchedEntryIDs.contains(entry.entry.id) else { continue }
+            let selectedTrackID = selectedVersionByEntryID[entry.entry.id] ?? entry.primaryTrack.id
+            let selectedTrack = entry.versions.first(where: { $0.id == selectedTrackID }) ?? entry.primaryTrack
+            if seen.insert(selectedTrack.seratoStoredPath).inserted {
+                output.append(selectedTrack.seratoStoredPath)
+            }
+        }
+
+        return output
+    }
+
+    private func mergedCratePathsPreservingPlaylistOrder(existing: [String], orderedSelected: [String]) -> [String] {
+        let selectedSet = Set(orderedSelected)
+        let existingRemainder = existing.filter { !selectedSet.contains($0) }
+        return uniquePreservingOrder(orderedSelected + existingRemainder)
+    }
+
+    private func uniquePreservingOrder(_ values: [String]) -> [String] {
+        var seen = Set<String>()
+        var output: [String] = []
+        for value in values {
+            if seen.insert(value).inserted {
+                output.append(value)
+            }
+        }
+        return output
+    }
+
+    private func crateFileURL(for crateName: String) -> URL {
+        libraryService.subcratesDirectory
+            .appendingPathComponent(crateName)
+            .appendingPathExtension("crate")
+    }
+}
+
+private extension PlaylistMatchView {
+    func preferredRipDestinationFolder() -> URL {
+        let root = libraryService.rootDirectory.standardizedFileURL
+        if root.path == "/" {
+            return FileManager.default.homeDirectoryForCurrentUser
+                .appendingPathComponent("Music", isDirectory: true)
+        }
+        return root.appendingPathComponent("Music", isDirectory: true)
+    }
+}
+
+private struct CachedState {
+    let rawInput: String
+    let crateName: String
+    let detectedPlaylistName: String?
+    let parserDiagnostics: PlaylistMatchService.ParserDiagnostics?
+    let successMessage: String?
+    let errorMessage: String?
+    let resolvedEntries: [PlaylistMatchService.PlaylistEntry]
+    let matchedEntries: [PlaylistMatchService.MatchedEntry]
+    let includedMatchedEntryIDs: Set<UUID>
+    let selectedVersionByEntryID: [UUID: UUID]
+    let bulkVersionPreference: PlaylistMatchView.BulkVersionPreference
+    let showOnlyUncheckedMatches: Bool
+    let matchedTracks: [Track]
+    let planItems: [PlaylistMatchService.PlanItem]
+    let resolvedEntryCount: Int
+    let youtubeURLByPlanID: [UUID: String]
+    let planStatusByID: [UUID: String]
+    let youtubeSuggestionsByPlanID: [UUID: [YouTubeAudioImportService.SearchResult]]
+    let matchedYoutubeURLByEntryID: [UUID: String]
+    let matchedStatusByEntryID: [UUID: String]
+    let matchedSuggestionsByEntryID: [UUID: [YouTubeAudioImportService.SearchResult]]
+}
+
+@MainActor
+private enum PlaylistMatchInMemoryCache {
+    static var state: CachedState?
+}
+
+private func writeDownloadedTrackToSeratoDatabase(
+    fileURL: URL,
+    rootDirectory: URL,
+    databaseFileURL: URL,
+    metadata: SeratoTrackMetadataUpdate
+) throws {
+    if FileManager.default.fileExists(atPath: databaseFileURL.path) {
+        try SeratoBackupBeforeWrite.snapshot(of: databaseFileURL)
+    }
+
+    let original = try Data(contentsOf: databaseFileURL)
+    let storedPath = SeratoLibraryLocator.seratoStoredPath(for: fileURL, rootDirectory: rootDirectory)
+
+    let ensured = SeratoDatabaseWriter.ensuringTrackExists(
+        forStoredPath: storedPath,
+        metadata: metadata,
+        in: original
+    )
+
+    let rewritten = SeratoDatabaseWriter.rewritingMetadata(
+        forStoredPath: storedPath,
+        metadata: metadata,
+        in: ensured.data
+    )
+
+    if ensured.didInsert || rewritten.didRewrite {
+        try AtomicFileWriter.write(rewritten.data, to: databaseFileURL)
     }
 }
 
