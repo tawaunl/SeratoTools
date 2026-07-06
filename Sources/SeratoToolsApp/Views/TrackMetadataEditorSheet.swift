@@ -47,6 +47,7 @@ struct TrackMetadataEditorSheet: View {
     @State private var lookupErrorMessage: String?
     @State private var fingerprintErrorMessage: String?
     @State private var saveErrorMessage: String?
+    @State private var saveSuccessMessage: String?
     @State private var lockedFields: Set<MetadataField> = []
 
     init(track: Track, onSave: @escaping (SeratoTrackMetadataUpdate) throws -> Void) {
@@ -117,6 +118,12 @@ struct TrackMetadataEditorSheet: View {
                 Text(saveErrorMessage)
                     .font(.caption)
                     .foregroundStyle(.red)
+            }
+
+            if let saveSuccessMessage {
+                Text(saveSuccessMessage)
+                    .font(.caption)
+                    .foregroundStyle(.green)
             }
 
             if !lookupResults.isEmpty {
@@ -281,8 +288,16 @@ struct TrackMetadataEditorSheet: View {
                                 year: Int(yearText.trimmingCharacters(in: .whitespacesAndNewlines))
                             )
                         )
-                        dismiss()
+                        saveErrorMessage = nil
+                        saveSuccessMessage = "Tag updated and saved."
+                        Task {
+                            try? await Task.sleep(nanoseconds: 800_000_000)
+                            await MainActor.run {
+                                dismiss()
+                            }
+                        }
                     } catch {
+                        saveSuccessMessage = nil
                         saveErrorMessage = error.localizedDescription
                     }
                 }

@@ -35,6 +35,8 @@ struct CrateDetailView: View {
     @State private var metadataLookupTrack: Track?
     @State private var quickDeleteAction: QuickDeleteAction?
     @State private var showQuickDeleteConfirmation = false
+    @State private var metadataSaveMessage: String?
+    @State private var metadataSaveMessageTask: Task<Void, Never>?
     @AppStorage(Self.confirmDeleteActionsDefaultsKey) private var confirmDeleteActions = true
     @State private var selectedGenreFilter: String?
 
@@ -238,6 +240,25 @@ struct CrateDetailView: View {
                 Text("\(action.title) for \(pendingDeleteTracks.count) selected track\(pendingDeleteTracks.count == 1 ? "" : "s")?")
             }
         }
+        .overlay(alignment: .topTrailing) {
+            if let metadataSaveMessage {
+                Text(metadataSaveMessage)
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.green)
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 6)
+                    .background(
+                        Capsule()
+                            .fill(Color.green.opacity(0.14))
+                    )
+                    .overlay(
+                        Capsule()
+                            .stroke(Color.green.opacity(0.4), lineWidth: 1)
+                    )
+                    .padding(.top, 10)
+                    .padding(.trailing, 12)
+            }
+        }
     }
 
     private func performOrConfirmQuickDelete(_ action: QuickDeleteAction) {
@@ -351,6 +372,20 @@ struct CrateDetailView: View {
             rewriteFilenameFromMetadata: SeratoFeatureFlags.isAutoRenameFromMetadataEnabled()
         )
         onCratesChanged()
+        showMetadataSaveSuccess()
+    }
+
+    private func showMetadataSaveSuccess() {
+        metadataSaveMessage = "Tag updated and saved."
+        metadataSaveMessageTask?.cancel()
+        metadataSaveMessageTask = Task {
+            try? await Task.sleep(nanoseconds: 2_000_000_000)
+            guard !Task.isCancelled else { return }
+            await MainActor.run {
+                metadataSaveMessage = nil
+                metadataSaveMessageTask = nil
+            }
+        }
     }
 
     private func statTag(title: String, value: Int, isActive: Bool = false, action: (() -> Void)? = nil) -> some View {

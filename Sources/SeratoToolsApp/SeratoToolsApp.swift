@@ -2,18 +2,29 @@ import AppKit
 import SwiftUI
 import SeratoToolsCore
 
+@MainActor
 final class SeratoToolsAppDelegate: NSObject, NSApplicationDelegate {
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApp.setActivationPolicy(.regular)
         NSApp.activate(ignoringOtherApps: true)
 
         // Ensure the first window becomes key/main after launch.
-        DispatchQueue.main.async {
+        DispatchQueue.main.async { [self] in
             if let window = NSApp.windows.first {
+                self.configureStandardWindowChrome(for: window)
                 window.makeKeyAndOrderFront(nil)
                 window.makeMain()
             }
         }
+    }
+
+    private func configureStandardWindowChrome(for window: NSWindow) {
+        window.styleMask.insert([.titled, .closable, .miniaturizable, .resizable])
+        window.titleVisibility = .visible
+        window.titlebarAppearsTransparent = false
+        window.standardWindowButton(.closeButton)?.isHidden = false
+        window.standardWindowButton(.miniaturizeButton)?.isHidden = false
+        window.standardWindowButton(.zoomButton)?.isHidden = false
     }
 }
 
@@ -55,7 +66,6 @@ struct SeratoToolsApp: App {
                 .environmentObject(libraryService)
                 .environmentObject(hiddenCrateStore)
                 .environmentObject(missingTracksService)
-                .toolbar(.hidden, for: .windowToolbar)
         }
     }
 }

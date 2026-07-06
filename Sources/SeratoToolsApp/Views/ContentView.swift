@@ -52,6 +52,8 @@ struct ContentView: View {
     @State private var quickTrackDeleteAction: QuickTrackDeleteAction?
     @State private var showQuickTrackDeleteConfirmation = false
     @State private var showDiscogsTokenSheet = false
+    @State private var metadataSaveMessage: String?
+    @State private var metadataSaveMessageTask: Task<Void, Never>?
     @AppStorage(Self.confirmDeleteActionsDefaultsKey) private var confirmDeleteActions = true
 
     private var totalCratesCount: Int {
@@ -176,6 +178,25 @@ struct ContentView: View {
         } message: {
             if let action = quickTrackDeleteAction {
                 Text("\(action.title) for \(pendingTrackDeleteSelection.count) selected track\(pendingTrackDeleteSelection.count == 1 ? "" : "s")?")
+            }
+        }
+        .overlay(alignment: .topTrailing) {
+            if let metadataSaveMessage {
+                Text(metadataSaveMessage)
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.green)
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 6)
+                    .background(
+                        Capsule()
+                            .fill(Color.green.opacity(0.14))
+                    )
+                    .overlay(
+                        Capsule()
+                            .stroke(Color.green.opacity(0.4), lineWidth: 1)
+                    )
+                    .padding(.top, 10)
+                    .padding(.trailing, 12)
             }
         }
     }
@@ -606,6 +627,20 @@ struct ContentView: View {
             rewriteFilenameFromMetadata: SeratoFeatureFlags.isAutoRenameFromMetadataEnabled()
         )
         reloadLibrary()
+        showMetadataSaveSuccess()
+    }
+
+    private func showMetadataSaveSuccess() {
+        metadataSaveMessage = "Tag updated and saved."
+        metadataSaveMessageTask?.cancel()
+        metadataSaveMessageTask = Task {
+            try? await Task.sleep(nanoseconds: 2_000_000_000)
+            guard !Task.isCancelled else { return }
+            await MainActor.run {
+                metadataSaveMessage = nil
+                metadataSaveMessageTask = nil
+            }
+        }
     }
 }
 

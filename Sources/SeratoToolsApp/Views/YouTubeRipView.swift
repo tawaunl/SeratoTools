@@ -1,5 +1,6 @@
 import SwiftUI
 import AppKit
+import UniformTypeIdentifiers
 import SeratoToolsCore
 
 struct YouTubeRipView: View {
@@ -89,6 +90,7 @@ struct YouTubeRipView: View {
     let onLibraryChanged: () -> Void
 
     @State private var urlText = ""
+    @State private var importedLinksFileName: String?
     @AppStorage(Self.destinationDefaultsKey) private var destinationPath = ""
     @AppStorage(Self.cratePrefixDefaultsKey) private var cratePrefix = "New Music"
     @AppStorage(Self.crateAssignmentDefaultsKey) private var crateAssignmentModeRaw = CrateAssignmentMode.dated.rawValue
@@ -105,6 +107,7 @@ struct YouTubeRipView: View {
     @State private var dependencyReady = false
     @State private var errorMessage: String?
     @State private var successMessage: String?
+    @State private var batchProgressMessage: String?
     @State private var lastSeratoWriteStatusMessage: String?
     @State private var recentDownloads: [RecentDownload] = []
 
@@ -139,11 +142,15 @@ struct YouTubeRipView: View {
         if isDownloading {
             return "Downloading..."
         }
-        return "Download + Create Dated Crate"
+        let count = parsedVideoURLs.count
+        if count > 1 {
+            return "Download \(count) Links"
+        }
+        return "Download"
     }
 
     private var canDownload: Bool {
-        !isDownloading && !isLoadingInfo && parsedVideoURL != nil && dependencyReady && isCrateSelectionValid
+        !isDownloading && !isLoadingInfo && !parsedVideoURLs.isEmpty && dependencyReady && isCrateSelectionValid
     }
 
     private var selectedFormat: YouTubeAudioImportService.AudioFormat {
@@ -209,7 +216,11 @@ struct YouTubeRipView: View {
     }
 
     private var parsedVideoURL: URL? {
-        normalizeVideoURL(from: urlText)
+        parsedVideoURLs.first
+    }
+
+    private var parsedVideoURLs: [URL] {
+        YouTubeBatchLinkImportService.parseVideoURLs(from: urlText)
     }
 
     var body: some View {
@@ -257,8 +268,14 @@ struct YouTubeRipView: View {
         VStack(alignment: .leading, spacing: 8) {
             Text("YouTube Rip")
                 .font(.system(size: 32, weight: .semibold, design: .default))
-            Text("Paste a video link, preview artwork and info, choose format and quality, then download audio straight into your main music folder with a dated crate.")
+            Text("Paste one or many YouTube links, or import CSV/Excel files of links, then batch download audio into your main music folder and crates.")
                 .foregroundStyle(.secondary)
+
+            if let batchProgressMessage {
+                Text(batchProgressMessage)
+                    .font(.callout.weight(.semibold))
+                    .foregroundStyle(.secondary)
+            }
 
             if let successMessage {
                 Text(successMessage)
@@ -292,16 +309,30 @@ struct YouTubeRipView: View {
 
     private var urlCard: some View {
         VStack(alignment: .leading, spacing: 12) {
-            Text("Video Link")
+            Text("Video Links")
                 .font(.title3.weight(.semibold))
 
+            TextEditor(text: $urlText)
+                .font(.body.monospaced())
+                .frame(minHeight: 110)
+                .padding(8)
+                .background(
+                    RoundedRectangle(cornerRadius: 8)
+                        .fill(Color(nsColor: .textBackgroundColor))
+                )
+                .overlay(
+                    RoundedRectangle(cornerRadius: 8)
+                        .stroke(Color.secondary.opacity(0.25), lineWidth: 1)
+                )
+
             HStack(spacing: 10) {
-                TextField("https://www.youtube.com/watch?v=...", text: $urlText)
-                    .textFieldStyle(.roundedBorder)
                 Button("Load Info") {
                     loadVideoInfo()
                 }
                 .disabled(isLoadingInfo || parsedVideoURL == nil)
+                Button("Import CSV/Excel") {
+                    chooseLinksFile()
+                }
                 Button("Check yt-dlp + ffmpeg") {
                     checkDependencies()
                 }
@@ -309,6 +340,17 @@ struct YouTubeRipView: View {
                     ProgressView()
                         .controlSize(.small)
                 }
+            }
+
+            let linkCount = parsedVideoURLs.count
+            Text("\(linkCount) valid YouTube link\(linkCount == 1 ? "" : "s") detected")
+                .font(.footnote)
+                .foregroundStyle(.secondary)
+
+            if let importedLinksFileName {
+                Text("Imported from: \(importedLinksFileName)")
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
             }
 
             if let dependencyStatusMessage {
@@ -661,9 +703,41 @@ struct YouTubeRipView: View {
         }
     }
 
+    private func chooseLinksFile() {
+        let panel = NSOpenPanel()
+        panel.canChooseFiles = true
+        panel.canChooseDirectories = false
+        panel.allowsMultipleSelection = false
+        panel.prompt = "Import Links"
+
+        var contentTypes: [UTType] = [.commaSeparatedText, .plainText]
+        if let xlsx = UTType(filenameExtension: "xlsx") {
+            contentTypes.append(xlsx)
+        }
+        if let xls = UTType(filenameExtension: "xls") {
+            contentTypes.append(xls)
+        }
+        panel.allowedContentTypes = contentTypes
+
+        guard panel.runModal() == .OK, let fileURL = panel.url else {
+            return
+        }
+
+        do {
+            let imported = try YouTubeBatchLinkImportService.parseVideoURLs(fromFile: fileURL)
+            let merged = deduplicatedURLs(parsedVideoURLs + imported)
+            urlText = merged.map(\.absoluteString).joined(separator: "\n")
+            importedLinksFileName = fileURL.lastPathComponent
+            successMessage = "Imported \(imported.count) links from \(fileURL.lastPathComponent)."
+            errorMessage = nil
+        } catch {
+            errorMessage = error.localizedDescription
+        }
+    }
+
     private func loadVideoInfo() {
         guard let videoURL = parsedVideoURL else {
-            errorMessage = "Paste a valid URL first."
+            errorMessage = "Paste at least one valid YouTube URL first."
             return
         }
 
@@ -709,8 +783,9 @@ struct YouTubeRipView: View {
     }
 
     private func runDownload() {
-        guard let videoURL = parsedVideoURL else {
-            errorMessage = "Paste a valid URL first."
+        let videoURLs = parsedVideoURLs
+        guard !videoURLs.isEmpty else {
+            errorMessage = "Paste at least one valid YouTube URL first."
             return
         }
 
@@ -722,6 +797,7 @@ struct YouTubeRipView: View {
         isDownloading = true
         errorMessage = nil
         successMessage = nil
+        batchProgressMessage = "Preparing batch..."
 
         let destinationFolderURL = destinationFolderURL
         let selectedFormat = selectedFormat
@@ -741,69 +817,103 @@ struct YouTubeRipView: View {
         let subcratesDirectory = libraryService.subcratesDirectory
         let rootDirectory = libraryService.rootDirectory
         let databaseFileURL = libraryService.databaseFile
+        let firstParsedURL = parsedVideoURL
 
         Task {
-            do {
-                let result = try await Task.detached(priority: .userInitiated) {
-                    try YouTubeAudioImportService.downloadAudio(
-                        .init(
-                            videoURL: videoURL,
-                            destinationFolderURL: destinationFolderURL,
-                            audioFormat: selectedFormat,
-                            audioQuality: selectedQuality,
-                            audioBitrateKbps: selectedBitrateKbps,
-                            metadata: metadataForDownload
-                        )
-                    )
-                }.value
+            var downloadedFileURLs: [URL] = []
+            var failures: [String] = []
+            var id3Warnings: [String] = []
+            var seratoWarnings: [String] = []
+            var lastOutcome: SeratoWriteOutcome = .unchanged
 
-                var id3MetadataWarning: String?
-                var seratoMetadataWarning: String?
-                var seratoWriteOutcome: SeratoWriteOutcome = .unchanged
-                var metadataForDatabaseWrite = baseMetadata
-
-                let fallbackInfo: YouTubeAudioImportService.VideoInfo?
-                if let loadedInfoSnapshot {
-                    fallbackInfo = loadedInfoSnapshot
-                } else {
-                    fallbackInfo = try? await Task.detached(priority: .utility) {
-                        try YouTubeAudioImportService.fetchVideoInfo(videoURL: videoURL)
-                    }.value
-                }
-
-                metadataForDatabaseWrite = enrichMetadata(
-                    metadataForDatabaseWrite,
-                    fallbackInfo: fallbackInfo,
-                    downloadedTitle: result.title
-                )
-
-                if selectedFormat == .mp3 {
-                    do {
-                        try SeratoTrackMetadataEditor.writeID3Tags(
-                            fileURL: result.outputFileURL,
-                            metadata: metadataForDatabaseWrite
-                        )
-                    } catch {
-                        id3MetadataWarning = "ID3 write failed: \(error.localizedDescription)"
-                    }
+            for (index, videoURL) in videoURLs.enumerated() {
+                await MainActor.run {
+                    batchProgressMessage = "Processing \(index + 1) of \(videoURLs.count)..."
                 }
 
                 do {
-                    seratoWriteOutcome = try writeSeratoMetadataForDownloadedFile(
-                        fileURL: result.outputFileURL,
-                        rootDirectory: rootDirectory,
-                        databaseFileURL: databaseFileURL,
-                        metadata: metadataForDatabaseWrite
-                    )
-                } catch {
-                    seratoMetadataWarning = "Serato DB write failed: \(error.localizedDescription)"
-                }
+                    let result = try await Task.detached(priority: .userInitiated) {
+                        try YouTubeAudioImportService.downloadAudio(
+                            .init(
+                                videoURL: videoURL,
+                                destinationFolderURL: destinationFolderURL,
+                                audioFormat: selectedFormat,
+                                audioQuality: selectedQuality,
+                                audioBitrateKbps: selectedBitrateKbps,
+                                metadata: metadataForDownload
+                            )
+                        )
+                    }.value
 
+                    let fallbackInfo: YouTubeAudioImportService.VideoInfo?
+                    if let loadedInfoSnapshot, firstParsedURL == videoURL {
+                        fallbackInfo = loadedInfoSnapshot
+                    } else {
+                        fallbackInfo = try? await Task.detached(priority: .utility) {
+                            try YouTubeAudioImportService.fetchVideoInfo(videoURL: videoURL)
+                        }.value
+                    }
+
+                    let metadataForDatabaseWrite = enrichMetadata(
+                        baseMetadata,
+                        fallbackInfo: fallbackInfo,
+                        downloadedTitle: result.title
+                    )
+
+                    if selectedFormat == .mp3 {
+                        do {
+                            try SeratoTrackMetadataEditor.writeID3Tags(
+                                fileURL: result.outputFileURL,
+                                metadata: metadataForDatabaseWrite
+                            )
+                        } catch {
+                            id3Warnings.append("\(result.outputFileURL.lastPathComponent): \(error.localizedDescription)")
+                        }
+                    }
+
+                    do {
+                        lastOutcome = try writeSeratoMetadataForDownloadedFile(
+                            fileURL: result.outputFileURL,
+                            rootDirectory: rootDirectory,
+                            databaseFileURL: databaseFileURL,
+                            metadata: metadataForDatabaseWrite
+                        )
+                    } catch {
+                        seratoWarnings.append("\(result.outputFileURL.lastPathComponent): \(error.localizedDescription)")
+                    }
+
+                    downloadedFileURLs.append(result.outputFileURL)
+
+                    await MainActor.run {
+                        appendRecentDownload(
+                            title: fallbackInfo?.title ?? result.title,
+                            fileName: result.outputFileURL.lastPathComponent,
+                            crateLabel: crateAssignmentMode == .none ? "No Crate" : "Queued for crate"
+                        )
+                    }
+                } catch {
+                    failures.append("\(videoURL.absoluteString): \(error.localizedDescription)")
+                }
+            }
+
+            guard !downloadedFileURLs.isEmpty else {
+                await MainActor.run {
+                    errorMessage = "All downloads failed."
+                    if !failures.isEmpty {
+                        errorMessage = "All downloads failed. " + failures.prefix(2).joined(separator: " | ")
+                    }
+                    batchProgressMessage = nil
+                    isDownloading = false
+                }
+                return
+            }
+
+            do {
                 let crateResult: AddMusicImportService.CrateCreationResult?
                 switch crateAssignmentMode {
                 case .dated:
                     crateResult = try AddMusicImportService.createDatedCrate(
-                        forAudioFiles: [result.outputFileURL],
+                        forAudioFiles: downloadedFileURLs,
                         crateNamePrefix: cratePrefix,
                         subcratesDirectory: subcratesDirectory,
                         rootDirectory: rootDirectory
@@ -813,7 +923,7 @@ struct YouTubeRipView: View {
                         throw AddMusicImportService.ImportError.missingCrateFileURL
                     }
                     crateResult = try AddMusicImportService.appendAudioFiles(
-                        [result.outputFileURL],
+                        downloadedFileURLs,
                         toExistingCrate: selectedExistingCrate,
                         rootDirectory: rootDirectory
                     )
@@ -822,46 +932,46 @@ struct YouTubeRipView: View {
                 }
 
                 await MainActor.run {
-                    let crateLabel: String
+                    var summary = "Downloaded \(downloadedFileURLs.count) of \(videoURLs.count) link\(videoURLs.count == 1 ? "" : "s")."
                     if let crateResult {
-                        successMessage = "Downloaded \(result.outputFileURL.lastPathComponent) and saved to crate \(crateResult.crateName)."
-                        crateLabel = "Crate: \(crateResult.crateName)"
+                        summary += " Saved to crate \(crateResult.crateName)."
                     } else {
-                        successMessage = "Downloaded \(result.outputFileURL.lastPathComponent) with no crate assignment."
-                        crateLabel = "No Crate"
+                        summary += " No crate assignment."
                     }
 
-                    if let id3MetadataWarning, !id3MetadataWarning.isEmpty {
-                        successMessage = (successMessage ?? "") + " \(id3MetadataWarning)"
+                    if !id3Warnings.isEmpty {
+                        summary += " ID3 warnings: \(id3Warnings.count)."
+                    }
+                    if !seratoWarnings.isEmpty {
+                        summary += " Serato warnings: \(seratoWarnings.count)."
+                    }
+                    if !failures.isEmpty {
+                        summary += " Failed: \(failures.count)."
                     }
 
-                    if let seratoMetadataWarning, !seratoMetadataWarning.isEmpty {
-                        successMessage = (successMessage ?? "") + " \(seratoMetadataWarning)"
-                        lastSeratoWriteStatusMessage = "Serato DB: write failed"
-                    } else {
-                        switch seratoWriteOutcome {
-                        case .inserted:
-                            lastSeratoWriteStatusMessage = "Serato DB: inserted new track row and wrote metadata"
-                        case .updated:
-                            lastSeratoWriteStatusMessage = "Serato DB: updated existing track metadata"
-                        case .unchanged:
-                            lastSeratoWriteStatusMessage = "Serato DB: track row already up to date"
-                        }
-                    }
-
-                    appendRecentDownload(
-                        title: loadedInfo?.title ?? result.title,
-                        fileName: result.outputFileURL.lastPathComponent,
-                        crateLabel: crateLabel
-                    )
-                    resetAfterSuccessfulDownload()
-
+                    successMessage = summary
                     errorMessage = nil
+
+                    switch lastOutcome {
+                    case .inserted:
+                        lastSeratoWriteStatusMessage = "Serato DB: inserted new track row and wrote metadata"
+                    case .updated:
+                        lastSeratoWriteStatusMessage = "Serato DB: updated existing track metadata"
+                    case .unchanged:
+                        lastSeratoWriteStatusMessage = seratoWarnings.isEmpty ? "Serato DB: track row already up to date" : "Serato DB: some writes failed"
+                    }
+
+                    resetAfterSuccessfulDownload()
+                    batchProgressMessage = nil
                     onLibraryChanged()
                 }
             } catch {
                 await MainActor.run {
                     errorMessage = error.localizedDescription
+                    if !failures.isEmpty {
+                        errorMessage = (errorMessage ?? "") + " Failed links: " + failures.prefix(2).joined(separator: " | ")
+                    }
+                    batchProgressMessage = nil
                 }
             }
 
@@ -999,6 +1109,7 @@ struct YouTubeRipView: View {
 
     private func resetAfterSuccessfulDownload() {
         urlText = ""
+        importedLinksFileName = nil
         loadedInfo = nil
         id3Title = ""
         id3Artist = ""
@@ -1175,27 +1286,18 @@ struct YouTubeRipView: View {
     }
 
     private func normalizeVideoURL(from rawText: String) -> URL? {
-        let trimmed = rawText.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty else { return nil }
+        YouTubeBatchLinkImportService.parseVideoURLs(from: rawText).first
+    }
 
-        let withScheme: String
-        if trimmed.lowercased().hasPrefix("http://") || trimmed.lowercased().hasPrefix("https://") {
-            withScheme = trimmed
-        } else {
-            withScheme = "https://\(trimmed)"
+    private func deduplicatedURLs(_ urls: [URL]) -> [URL] {
+        var seen = Set<String>()
+        var output: [URL] = []
+        for url in urls {
+            let key = url.absoluteString.lowercased()
+            if seen.insert(key).inserted {
+                output.append(url)
+            }
         }
-
-        guard let url = URL(string: withScheme),
-              let scheme = url.scheme?.lowercased(),
-              ["http", "https"].contains(scheme),
-              let host = url.host?.lowercased() else {
-            return nil
-        }
-
-        guard host.contains("youtube.com") || host.contains("youtu.be") else {
-            return nil
-        }
-
-        return url
+        return output
     }
 }
