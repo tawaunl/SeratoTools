@@ -404,18 +404,6 @@ public enum LibraryConsolidationService {
 
     private static func sourceGroupDirectory(for sourceURL: URL, baseURL: URL) -> URL {
         let sourceDirectory = sourceURL.deletingLastPathComponent().standardizedFileURL
-        let baseComponents = baseURL.standardizedFileURL.pathComponents
-        let sourceComponents = sourceDirectory.pathComponents
-
-        guard sourceComponents.starts(with: baseComponents) else {
-            return sourceDirectory
-        }
-
-        let relativeComponents = Array(sourceComponents.dropFirst(baseComponents.count))
-        guard let first = relativeComponents.first else {
-            return baseURL.standardizedFileURL
-        }
-
-        return baseURL.standardizedFileURL.appendingPathComponent(first, isDirectory: true)
+        return sourceDirectory
     }
 }
