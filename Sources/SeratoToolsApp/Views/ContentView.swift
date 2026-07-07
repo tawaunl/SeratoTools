@@ -306,12 +306,14 @@ struct ContentView: View {
         case .tracks:
             VStack(alignment: .leading, spacing: 8) {
                 HStack(spacing: 8) {
-                    TextField("Library directory", text: $libraryPathDraft)
-                        .textFieldStyle(.roundedBorder)
-                        .onTapGesture {
-                            NSApp.activate(ignoringOtherApps: true)
-                        }
-                    Button("Browse…") { chooseLibraryDirectory() }
+                    FinderFolderControls(
+                        label: "Library directory",
+                        path: $libraryPathDraft,
+                        browsePrompt: "Use Library",
+                        browseStartURL: URL(fileURLWithPath: libraryPathDraft.isEmpty ? libraryService.libraryDirectory.path : libraryPathDraft),
+                        allowsNewFolderCreation: false,
+                        onPathChanged: applyLibraryDirectory
+                    )
                     Button("Apply") { applyLibraryDirectory() }
                     Button("Reload") { reloadLibrary() }
                     Button("API Keys…") { showDiscogsTokenSheet = true }
@@ -532,20 +534,6 @@ struct ContentView: View {
             }
         }
         return nil
-    }
-
-    private func chooseLibraryDirectory() {
-        let panel = NSOpenPanel()
-        panel.canChooseFiles = false
-        panel.canChooseDirectories = true
-        panel.allowsMultipleSelection = false
-        panel.prompt = "Use Library"
-        panel.directoryURL = URL(fileURLWithPath: libraryPathDraft)
-
-        if panel.runModal() == .OK, let url = panel.url {
-            libraryPathDraft = url.path
-            applyLibraryDirectory()
-        }
     }
 
     private func applyLibraryDirectory() {

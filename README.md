@@ -1,112 +1,108 @@
 # SeratoTools
 
-SeratoTools is a macOS-native toolkit for maintaining and extending a Serato DJ library.
+SeratoTools is a native macOS toolkit for DJs who want a cleaner, safer, and more reliable Serato library.
 
-It includes:
+From broken file paths to crate organization to bulk metadata cleanup, SeratoTools helps you spend less time fixing your library and more time playing music.
 
-- A SwiftUI desktop app for day-to-day library operations.
-- A command-line importer for automation and Finder workflows.
-- Core services for parsing and rewriting Serato library/crate files safely.
+## Why DJs Use SeratoTools
 
-The project is organized as Swift Package Manager targets:
+- Recover missing tracks and repair moved files
+- Build and manage crates faster
+- Import new music with less manual busywork
+- Batch-fix metadata for cleaner browsing and searching
+- Consolidate scattered libraries without breaking references
+- Run safer write operations with backup and atomic update patterns
 
-- `SeratoToolsApp` (GUI)
-- `SeratoToolsCLI` (CLI)
-- `SeratoToolsCore` (shared parsing/services/writing)
+## Product Surfaces
 
-## Why SeratoTools
-
-Serato libraries can get messy over time: moved files, split folders, inconsistent metadata, and slow manual crate updates.
-SeratoTools focuses on practical, high-impact workflows that keep your library playable and organized while preserving Serato compatibility.
+| Module | What it does |
+|---|---|
+| SeratoToolsApp | Visual workflows for tracks, crates, matching, backup, and consolidation |
+| SeratoToolsCLI | Scriptable import flow for fast ingestion and crate assignment |
+| SeratoToolsCore | Shared parsers, writers, and safety-focused data operations |
 
 ## Feature Highlights
 
-### 1) Tracks Workspace
+### Tracks Workspace
 
-- Loads your Serato library and track database.
-- Lets you browse tracks and inspect metadata.
-- Includes quick delete actions with confirmation controls.
-- Supports track metadata editing with online and fingerprint-assisted lookup.
+- Browse your library and inspect track metadata
+- Perform quick actions with confirmation controls
+- Edit metadata with online lookup and fingerprint-assisted suggestions
 
-### 2) PlaylistMatch
+### PlaylistMatch
 
-- Accepts playlist input from:
-  - Spotify playlist URLs
-  - CSV files (Title/Artist style)
-  - Plain text lists like `Artist - Title`
-- Scans your existing Serato library for matches.
-- Shows confidence/reasoning and version choices per match.
-- Creates crates from chosen matches.
-- Keeps unmatched tracks in a "Plan" workflow.
-- Supports YouTube search/rip assist for unresolved tracks.
+- Paste Spotify playlist URLs, CSV rows, or plain text track lists
+- Match against your Serato collection with confidence scoring and version selection
+- Create crates from confirmed matches
+- Keep unresolved entries in a Plan queue and resolve with YouTube-assisted flows
 
-### 3) Add Music
+### Add Music
 
-- Imports files and folders into your main music folder.
-- Supports move or copy transfer modes.
-- Discovers supported audio files recursively.
-- Creates a dated crate (or targets an existing crate / no crate).
-- Includes folder sync into Serato DB flows.
+- Import files and folders into your destination music directory
+- Move or copy mode based on your workflow
+- Auto-discover supported audio formats recursively
+- Create a dated crate, target an existing crate, or import without crate assignment
 
-### 4) YouTube Rip
+### YouTube Rip
 
-- Handles one or many YouTube links in a batch.
-- Supports link import from text/CSV-like lists.
-- Downloads audio to your chosen destination using `yt-dlp` + `ffmpeg`.
-- Can write imported tracks into dated or existing crates.
-- Supports output format, quality, and bitrate choices.
-- Includes optional ID3 metadata editing and online metadata lookup.
+- Process one or many links in a single batch
+- Download audio with yt-dlp and ffmpeg integration
+- Route output into crates and your main music location
+- Control format, quality, bitrate, and metadata behavior
 
-### 5) Crates
+### Crates
 
-- Displays crate and smart crate hierarchy.
-- Supports crate-level navigation and filtering.
-- Surfaces crate stats (counts, smart, hidden, etc.).
-- Provides crate detail browsing and track table actions.
+- Navigate regular and smart crate trees
+- Filter and inspect crate contents quickly
+- Use crate-centric track operations and stats
 
-### 6) Tags (Bulk Metadata)
+### Tags Bulk Edit
 
-- Scope-based editing (All Tracks or specific crate/smart crate).
-- Bulk apply for Artist / Genre / Year.
-- "Only Fill Empty" mode to avoid overwriting existing metadata.
-- Completion stats by scope versus whole-library baseline.
-- Single-track deep metadata edit via lookup sheet.
+- Edit Artist, Genre, and Year across All Tracks or selected crate scopes
+- Use Only Fill Empty to protect existing metadata
+- Track completion quality with scope vs global baseline metrics
 
-### 7) Missing Tracks
+### Missing Tracks
 
-- Detects missing library entries.
-- Scans for candidate moved/renamed files.
-- Allows explicit per-track repair (no silent auto-apply).
-- Can gather unresolved items into a review crate.
+- Identify unresolved file references
+- Find likely moved/renamed candidates
+- Apply explicit per-track fixes
+- Build a review crate for unresolved items
 
-### 8) Backup
+### Backup
 
-- Creates timestamped backups in `SeratoBackups`.
-- Backup modes:
-  - Full
-  - Incremental
-  - Single-crate package
-- Shows pre-backup estimates (tracks, crates, size).
+- Generate timestamped backups in SeratoBackups
+- Use full, incremental, or single-crate modes
+- Preview size and count estimates before committing
 
-### 9) Library Consolidation
+### Library Consolidation
 
-- Analyzes scattered source locations across your collection.
-- Moves or copies tracks into one central destination.
-- Rewrites Serato paths so crates/library references stay valid.
-- Lets you select which source groups to process.
-- Checks destination capacity for copy mode planning.
+- Map fragmented source folders across your collection
+- Move or copy into a single destination
+- Rewrite Serato paths so crates and references remain valid
+- Select source groups and validate destination capacity first
 
-## CLI Workflow
+## Quick Start
 
-`SeratoToolsCLI` provides Add Music import automation.
+### Build
 
-Usage:
+```bash
+swift build
+```
+
+### Launch App
+
+```bash
+swift run SeratoTools
+```
+
+### Check CLI
 
 ```bash
 swift run SeratoToolsCLI --help
 ```
 
-Common example:
+## CLI Example
 
 ```bash
 swift run SeratoToolsCLI \
@@ -118,17 +114,15 @@ swift run SeratoToolsCLI \
 
 CLI options:
 
-- `-d, --destination <path>` destination folder (default `~/Music`)
-- `-c, --crate-prefix <name>` dated crate prefix (default `New Music`)
-- `-m, --mode <move|copy>` transfer mode
-- `-l, --library-dir <path>` override `_Serato_` directory
-- `-h, --help` show help
+- -d, --destination <path>
+- -c, --crate-prefix <name>
+- -m, --mode <move|copy>
+- -l, --library-dir <path>
+- -h, --help
 
 ## Finder Quick Action
 
-The repository includes an install script for a Finder Quick Action (`Add To Serato Library`) powered by `SeratoToolsCLI`.
-
-Install from repo:
+Install from source checkout:
 
 ```bash
 ./Scripts/install-finder-quick-action.sh
@@ -140,67 +134,32 @@ Install from packaged app:
 /Applications/SeratoTools.app/Contents/Resources/scripts/install-finder-quick-action.sh
 ```
 
-Supported env vars for Quick Action behavior:
+Environment controls:
 
-- `SERATOTOOLS_ADD_MODE` (`move` or `copy`)
-- `SERATOTOOLS_ADD_DESTINATION`
-- `SERATOTOOLS_ADD_CRATE_PREFIX`
-- `SERATOTOOLS_LIBRARY_DIR`
+- SERATOTOOLS_ADD_MODE
+- SERATOTOOLS_ADD_DESTINATION
+- SERATOTOOLS_ADD_CRATE_PREFIX
+- SERATOTOOLS_LIBRARY_DIR
 
-## Safety and Data Integrity
+## Safety and Reliability
 
-SeratoTools is designed around safe write behavior:
+SeratoTools is built to reduce risk during library mutation.
 
-- Uses explicit user actions for risky operations.
-- Avoids silent missing-track auto-fixes.
-- Uses backup and atomic write strategies in core safety services.
-- Emphasizes user-readable errors (`LocalizedError`) for actionable failure states.
-
-## Library Discovery and Path Handling
-
-SeratoTools can locate `_Serato_` via:
-
-1. `SERATOTOOLS_LIBRARY_DIR`
-2. user defaults override
-3. auto-detection from valid library locations
-4. fallback to `~/Music/_Serato_`
-
-It handles Serato path conventions and external-volume layouts when resolving and rewriting track paths.
+- Explicit user actions for sensitive operations
+- No silent auto-repair in missing-track workflows
+- Backup plus atomic-write patterns in core services
+- User-readable LocalizedError messages for recovery guidance
 
 ## Requirements
 
 - macOS 14+
-- Swift 6 toolchain
-- For YouTube features: `yt-dlp` and `ffmpeg`
-- For audio fingerprint lookup: `fpcalc` (Chromaprint)
-- Optional metadata source token:
-  - `SERATOTOOLS_DISCOGS_TOKEN` (or saved Discogs token)
-- Optional fingerprint token:
-  - `SERATOTOOLS_ACOUSTID_KEY` (or saved AcoustID key)
+- Swift 6
+- yt-dlp and ffmpeg for YouTube workflows
+- fpcalc for audio fingerprint lookup
+- Optional: SERATOTOOLS_DISCOGS_TOKEN
+- Optional: SERATOTOOLS_ACOUSTID_KEY
 
-## Build and Run
-
-Build all targets:
-
-```bash
-swift build
-```
-
-Run GUI app target:
-
-```bash
-swift run SeratoTools
-```
-
-Run CLI target:
-
-```bash
-swift run SeratoToolsCLI --help
-```
-
-## Tests
-
-Run core tests:
+## Test
 
 ```bash
 swift test
@@ -208,7 +167,7 @@ swift test
 
 ## Packaging
 
-Build standalone app bundle:
+Build app bundle:
 
 ```bash
 ./Scripts/build-app.sh
@@ -220,24 +179,41 @@ Build installer package:
 ./Scripts/build-installer.sh
 ```
 
-Outputs are written to `dist/`.
+Build universal2 package (Apple Silicon + Intel):
+
+```bash
+SERATOTOOLS_BUILD_UNIVERSAL=1 ./Scripts/build-installer.sh
+```
+
+Artifacts are written to dist/.
+
+Installer note:
+
+- Runtime dependencies are bundled inside the app (fpcalc, yt-dlp, ffmpeg, ffprobe, plus required non-system dylibs), so target machines do not need Homebrew dependency provisioning.
 
 ## Project Layout
 
-- `Sources/SeratoToolsApp/` SwiftUI app and feature views
-- `Sources/SeratoToolsCLI/` command-line entrypoint
-- `Sources/SeratoToolsCore/` parsers, models, safety, services, writers
-- `Scripts/` build/package/install helpers
-- `docs/` architecture notes, packaging docs, roadmap, engineering rules
-- `Tests/SeratoToolsCoreTests/` core behavior and format tests
+- Sources/SeratoToolsApp/
+- Sources/SeratoToolsCLI/
+- Sources/SeratoToolsCore/
+- Scripts/
+- docs/
+- Tests/SeratoToolsCoreTests/
 
-## Additional Docs
+## Docs
 
-- `docs/ROADMAP.md` phased feature direction and architecture notes
-- `docs/PACKAGING_STANDALONE.md` app/pkg packaging details
-- `docs/FINDER_QUICK_ACTION_ADD_MUSIC.md` Finder integration details
-- `docs/ENGINEERING_RULES.md` coding and error-handling standards
+- [docs/TROUBLESHOOTING.md](docs/TROUBLESHOOTING.md)
+- [docs/ROADMAP.md](docs/ROADMAP.md)
+- [docs/PACKAGING_STANDALONE.md](docs/PACKAGING_STANDALONE.md)
+- [docs/FINDER_QUICK_ACTION_ADD_MUSIC.md](docs/FINDER_QUICK_ACTION_ADD_MUSIC.md)
+- [docs/ENGINEERING_RULES.md](docs/ENGINEERING_RULES.md)
+
+## Need Help?
+
+Start with the troubleshooting Q and A guide:
+
+- [docs/TROUBLESHOOTING.md](docs/TROUBLESHOOTING.md)
 
 ## Status
 
-Active development with strong focus on practical DJ workflows, safe library mutation, and clear, user-actionable error handling.
+Active development focused on practical DJ utility, safer data mutation, and polished workflow UX.

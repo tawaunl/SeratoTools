@@ -145,12 +145,16 @@ struct AddMusicView: View {
             }
             .pickerStyle(.segmented)
 
+            FinderFolderControls(
+                label: "Main music folder",
+                path: $destinationPath,
+                browsePrompt: "Use Folder",
+                browseStartURL: destinationFolderURL,
+                allowsNewFolderCreation: true,
+                onPathChanged: refreshDiscoveredCount
+            )
+
             HStack(spacing: 10) {
-                TextField("Main music folder", text: $destinationPath)
-                    .textFieldStyle(.roundedBorder)
-                Button("Browse...") {
-                    chooseDestinationFolder()
-                }
                 Button(isSyncingFolder ? "Syncing..." : "Sync Folder To Serato DB") {
                     syncDestinationFolderToSeratoLibrary()
                 }
@@ -305,23 +309,11 @@ struct AddMusicView: View {
         )
     }
 
-    private func chooseDestinationFolder() {
-        let panel = NSOpenPanel()
-        panel.canChooseFiles = false
-        panel.canChooseDirectories = true
-        panel.allowsMultipleSelection = false
-        panel.prompt = "Use Folder"
-        panel.directoryURL = destinationFolderURL
-
-        if panel.runModal() == .OK, let url = panel.url {
-            destinationPath = url.path
-        }
-    }
-
     private func chooseFilesAndFolders() {
         let panel = NSOpenPanel()
         panel.canChooseFiles = true
         panel.canChooseDirectories = true
+        panel.canCreateDirectories = true
         panel.allowsMultipleSelection = true
         panel.prompt = "Add"
 

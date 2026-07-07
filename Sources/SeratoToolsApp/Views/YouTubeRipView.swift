@@ -553,13 +553,14 @@ struct YouTubeRipView: View {
                 }
             }
 
-            HStack(spacing: 10) {
-                TextField("Main music folder", text: $destinationPath)
-                    .textFieldStyle(.roundedBorder)
-                Button("Browse...") {
-                    chooseDestinationFolder()
-                }
-            }
+            FinderFolderControls(
+                label: "Main music folder",
+                path: $destinationPath,
+                browsePrompt: "Use Folder",
+                browseStartURL: destinationFolderURL,
+                allowsNewFolderCreation: true,
+                onPathChanged: nil
+            )
 
             HStack(spacing: 10) {
                 Text("Crate Prefix")
@@ -786,23 +787,11 @@ struct YouTubeRipView: View {
             .controlSize(.small)
     }
 
-    private func chooseDestinationFolder() {
-        let panel = NSOpenPanel()
-        panel.canChooseFiles = false
-        panel.canChooseDirectories = true
-        panel.allowsMultipleSelection = false
-        panel.prompt = "Use Folder"
-        panel.directoryURL = destinationFolderURL
-
-        if panel.runModal() == .OK, let url = panel.url {
-            destinationPath = url.path
-        }
-    }
-
     private func chooseLinksFile() {
         let panel = NSOpenPanel()
         panel.canChooseFiles = true
         panel.canChooseDirectories = false
+        panel.canCreateDirectories = true
         panel.allowsMultipleSelection = false
         panel.prompt = "Import Links"
 
