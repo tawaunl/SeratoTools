@@ -130,10 +130,8 @@ public enum LibraryConsolidationService {
             let groupDirectory = sourceGroupDirectory(for: sourceURL, baseURL: descriptor.baseURL)
             let groupKey = groupDirectory.path
 
-            let relativePath = relativePath(from: sourceURL, baseURL: descriptor.baseURL)
             var destinationURL = destinationRoot
-                .appendingPathComponent(descriptor.destinationPrefix, isDirectory: true)
-                .appendingPathComponent(relativePath)
+                .appendingPathComponent(sourceURL.lastPathComponent)
 
             destinationURL = uniquedDestinationURL(
                 destinationURL,
@@ -369,19 +367,6 @@ public enum LibraryConsolidationService {
             baseURL: URL(fileURLWithPath: "/", isDirectory: true),
             examplePath: "/"
         )
-    }
-
-    private static func relativePath(from fileURL: URL, baseURL: URL) -> String {
-        let baseComponents = baseURL.standardizedFileURL.pathComponents
-        var fileComponents = fileURL.standardizedFileURL.pathComponents
-        if fileComponents.starts(with: baseComponents) {
-            fileComponents.removeFirst(baseComponents.count)
-        }
-
-        if fileComponents.isEmpty {
-            return fileURL.lastPathComponent
-        }
-        return NSString.path(withComponents: fileComponents)
     }
 
     private static func uniquedDestinationURL(

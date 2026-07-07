@@ -92,3 +92,44 @@ private func makeScratchLibrary() throws -> (libraryDirectory: URL, databaseFile
         #expect(reparsedCrate.trackPaths.contains(expectedStoredPath))
     }
 }
+
+@Test func consolidationFlattensFilesIntoSingleDestinationFolder() throws {
+    let scratch = try makeScratchLibrary()
+    defer { try? FileManager.default.removeItem(at: scratch.rootDirectory) }
+
+    SeratoBackupBeforeWrite.backupDirectory = scratch.rootDirectory.appendingPathComponent("Backups")
+
+    let tracks = try SeratoDatabaseParser.parseTracks(at: scratch.databaseFile, rootDirectory: scratch.rootDirectory)
+    let crate = try SeratoCrateParser.parseCrate(at: scratch.crateFile)
+
+    let selectedTracks = tracks.filter { crate.trackPaths.contains($0.seratoStoredPath) }
+    #expect(selectedTracks.count >= 2)
+
+    for track in selectedTracks {
+        let directory = track.fileURL.deletingLastPathComponent()
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        try Data("test".utf8).write(to: track.fileURL)
+    }
+
+    let destinationFolder = scratch.rootDirectory.appendingPathComponent("Flat Consolidated Music", isDirectory: true)
+    let preview = LibraryConsolidationService.preview(
+        tracks: selectedTracks,
+        destinationFolderURL: destinationFolder,
+        homeDirectory: scratch.rootDirectory
+    )
+
+    #expect(preview.moves.allSatisfy { $0.destinationURL.deletingLastPathComponent() == destinationFolder.standardizedFileURL })
+    #expect(preview.moves.allSatisfy { !$0.destinationURL.path.replacingOccurrences(of: destinationFolder.standardizedFileURL.path + "/", with: "").contains("/") })
+
+    let result = try LibraryConsolidationService.consolidate(
+        preview: preview,
+        mode: .move,
+        crates: [Crate(pathComponents: crate.pathComponents, trackPaths: crate.trackPaths, fileURL: scratch.crateFile)],
+        rootDirectory: scratch.rootDirectory,
+        databaseFileURL: scratch.databaseFile
+    )
+
+    #expect(result.processedTrackCount == selectedTracks.count)
+    #expect(result.updatedCrateCount == 1)
+    #expect((try FileManager.default.contentsOfDirectory(at: destinationFolder, includingPropertiesForKeys: nil)).allSatisfy { $0.hasDirectoryPath == false })
+}
