@@ -141,9 +141,6 @@ struct CrateDetailView: View {
                         onSelectionChanged: { selected in
                             selectedTracksForActions = selected
                         },
-                        onTrackSingleClick: { track in
-                            metadataLookupTrack = track
-                        },
                         onTrackActivated: { track in
                             onTrackActivated?(track)
                         }

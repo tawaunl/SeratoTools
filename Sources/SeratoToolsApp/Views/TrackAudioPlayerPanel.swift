@@ -87,7 +87,6 @@ struct TrackAudioPlayerPanel: View {
     @StateObject private var player = TrackAudioPlayerViewModel()
     @State private var keyMonitor: Any?
     @AppStorage("TrackAudioPlayerMiniModeEnabled") private var miniModeEnabled = false
-    @FocusState private var isPanelFocused: Bool
 
     init(track: Track, activationToken: Int = 0) {
         self.track = track
@@ -173,17 +172,9 @@ struct TrackAudioPlayerPanel: View {
                 .stroke(Color.secondary.opacity(0.2), lineWidth: 1)
         )
         .clipShape(RoundedRectangle(cornerRadius: 6))
-        .focusable(true)
-        .focused($isPanelFocused)
-        .simultaneousGesture(
-            TapGesture().onEnded {
-                isPanelFocused = true
-            }
-        )
         .onAppear {
             player.load(track: track)
             installKeyboardMonitor()
-            isPanelFocused = true
             if activationToken > 0 {
                 player.startPlayback()
             }
@@ -193,12 +184,10 @@ struct TrackAudioPlayerPanel: View {
         }
         .onChange(of: track.id) {
             player.load(track: track)
-            isPanelFocused = true
         }
         .onChange(of: activationToken) {
             guard player.loadedTrackPath != nil else { return }
             player.startPlayback()
-            isPanelFocused = true
         }
         .onReceive(Timer.publish(every: 0.12, on: .main, in: .common).autoconnect()) { _ in
             player.refreshProgress()
@@ -209,7 +198,7 @@ struct TrackAudioPlayerPanel: View {
         guard keyMonitor == nil else { return }
 
         keyMonitor = NSEvent.addLocalMonitorForEvents(matching: [.keyDown]) { event in
-            guard isPanelFocused else {
+            if isTextInputActive() {
                 return event
             }
 
@@ -231,6 +220,11 @@ struct TrackAudioPlayerPanel: View {
         guard let keyMonitor else { return }
         NSEvent.removeMonitor(keyMonitor)
         self.keyMonitor = nil
+    }
+
+    private func isTextInputActive() -> Bool {
+        guard let responder = NSApp.keyWindow?.firstResponder else { return false }
+        return responder is NSTextView
     }
 
     private func formatTime(_ seconds: Double) -> String {

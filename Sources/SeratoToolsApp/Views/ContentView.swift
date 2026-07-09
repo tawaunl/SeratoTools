@@ -457,9 +457,6 @@ struct ContentView: View {
                         onSelectionChanged: { selected in
                             selectedTracksForActions = selected
                         },
-                        onTrackSingleClick: { track in
-                            metadataLookupTrack = track
-                        },
                         onTrackActivated: { track in
                             activeAudioTrack = track
                             audioActivationToken += 1

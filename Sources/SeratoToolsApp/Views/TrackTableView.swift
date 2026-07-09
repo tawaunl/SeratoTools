@@ -430,9 +430,7 @@ private struct TrackNSTableView: NSViewRepresentable {
         }
 
         @objc func handleSingleClick(_ sender: Any?) {
-            guard let table = tableView,
-                  let onTrackSingleClick = parent.onTrackSingleClick
-            else {
+            guard let table = tableView else {
                 return
             }
 
@@ -460,7 +458,13 @@ private struct TrackNSTableView: NSViewRepresentable {
             let key = selectionKey(for: track)
 
             if lastSingleClickedSelectionKey == key {
-                onTrackSingleClick(track)
+                let column = table.clickedColumn
+                if column >= 0 {
+                    let columnID = table.tableColumns[column].identifier.rawValue
+                    if editableColumnIDs.contains(columnID) {
+                        beginInlineEdit(row: row, column: column)
+                    }
+                }
             }
 
             lastSingleClickedSelectionKey = key
@@ -486,6 +490,21 @@ private struct TrackNSTableView: NSViewRepresentable {
             guard row >= 0, row < parent.tracks.count else { return }
             lastSingleClickedSelectionKey = selectionKey(for: parent.tracks[row])
             parent.onTrackActivated?(parent.tracks[row])
+        }
+
+        private func beginInlineEdit(row: Int, column: Int) {
+            guard let table = tableView,
+                  row >= 0, row < parent.tracks.count,
+                  column >= 0, column < table.tableColumns.count
+            else { return }
+
+            guard let cell = table.view(atColumn: column, row: row, makeIfNecessary: false) as? NSTableCellView,
+                  let textField = cell.textField as? EditableTextField
+            else { return }
+
+            textField.isEditable = true
+            table.window?.makeFirstResponder(textField)
+            textField.currentEditor()?.selectAll(nil)
         }
 
         func controlTextDidEndEditing(_ obj: Notification) {
