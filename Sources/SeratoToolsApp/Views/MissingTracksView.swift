@@ -173,11 +173,13 @@ struct MissingTracksView: View {
 }
 
 private struct MissingTrackRow: View {
+    @EnvironmentObject private var libraryService: LibraryService
     @EnvironmentObject private var missingTracksService: MissingTracksService
     let candidate: MissingTrackCandidate
     let preferredDirectory: URL?
 
     @State private var errorMessage: String?
+    @State private var showDeleteConfirmation = false
 
     var body: some View {
         HStack {
@@ -198,6 +200,18 @@ private struct MissingTrackRow: View {
         } message: {
             Text(errorMessage ?? "")
         }
+        .confirmationDialog(
+            "Delete from Library?",
+            isPresented: $showDeleteConfirmation,
+            titleVisibility: .visible
+        ) {
+            Button("Delete Track Reference", role: .destructive) {
+                deleteFromLibrary()
+            }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("This removes the missing track from Serato library metadata and any crates that reference it. The audio file is not touched.")
+        }
     }
 
     // Even a single unambiguous match requires an explicit click — a
@@ -211,9 +225,14 @@ private struct MissingTrackRow: View {
         } else {
             switch candidate.matches.count {
             case 0:
-                Text("No match found")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
+                HStack(spacing: 8) {
+                    Text("No match found")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                    Button("Delete from Library", role: .destructive) {
+                        showDeleteConfirmation = true
+                    }
+                }
             case 1:
                 Button("Fix") { fix(using: candidate.matches[0]) }
             default:
@@ -229,6 +248,15 @@ private struct MissingTrackRow: View {
     private func fix(using url: URL) {
         do {
             try missingTracksService.repair(candidate, using: url)
+        } catch {
+            errorMessage = error.localizedDescription
+        }
+    }
+
+    private func deleteFromLibrary() {
+        do {
+            _ = try missingTracksService.deleteFromLibrary(candidate, in: libraryService.crates)
+            try? libraryService.reload()
         } catch {
             errorMessage = error.localizedDescription
         }

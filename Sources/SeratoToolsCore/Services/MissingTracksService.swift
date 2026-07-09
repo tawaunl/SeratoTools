@@ -9,6 +9,29 @@ import Foundation
 /// stale, so it's intentionally not consulted here.
 @MainActor
 public final class MissingTracksService: ObservableObject {
+    public enum MissingTracksError: Error, LocalizedError {
+        case trackNotFoundInLibrary
+        case crateUpdateFailed(crateName: String)
+
+        public var errorDescription: String? {
+            switch self {
+            case .trackNotFoundInLibrary:
+                return "The track could not be found in Serato's library metadata."
+            case let .crateUpdateFailed(crateName):
+                return "The track was removed from the library database, but updating crate '\(crateName)' failed."
+            }
+        }
+
+        public var recoverySuggestion: String? {
+            switch self {
+            case .trackNotFoundInLibrary:
+                return "Reload the library and try again."
+            case .crateUpdateFailed:
+                return "Reload your crates and remove the track manually from the affected crate if needed."
+            }
+        }
+    }
+
     @Published public private(set) var candidates: [MissingTrackCandidate] = []
     @Published public private(set) var isScanning = false
 
@@ -62,6 +85,44 @@ public final class MissingTracksService: ObservableObject {
         )
         candidates.removeAll { $0.id == candidate.id }
         return didRewrite
+    }
+
+    /// Removes a missing track from Serato library metadata (`database V2`)
+    /// and from any crate files that still reference it.
+    @discardableResult
+    public func deleteFromLibrary(_ candidate: MissingTrackCandidate, in crates: [Crate]) throws -> Bool {
+        guard !SeratoProcessGuard.isSeratoRunning else {
+            throw SeratoPathRewriter.RewriteError.seratoIsRunning
+        }
+
+        let storedPath = candidate.track.seratoStoredPath
+
+        if fileManager.fileExists(atPath: databaseFileURL.path) {
+            try SeratoBackupBeforeWrite.snapshot(of: databaseFileURL)
+        }
+
+        let data = try Data(contentsOf: databaseFileURL)
+        let rewritten = SeratoDatabaseWriter.removingPaths([storedPath], in: data)
+        guard rewritten.didRewrite else {
+            throw MissingTracksError.trackNotFoundInLibrary
+        }
+
+        try AtomicFileWriter.write(rewritten.data, to: databaseFileURL)
+
+        for crate in crates {
+            guard crate.fileURL?.pathExtension.lowercased() == "crate" else { continue }
+            guard crate.trackPaths.contains(storedPath) else { continue }
+
+            let rewrittenPaths = crate.trackPaths.filter { $0 != storedPath }
+            do {
+                _ = try SeratoCrateEditor.rewriteTrackPaths(in: crate, to: rewrittenPaths)
+            } catch {
+                throw MissingTracksError.crateUpdateFailed(crateName: crate.name)
+            }
+        }
+
+        candidates.removeAll { $0.id == candidate.id }
+        return true
     }
 
     /// Returns the best match that lives inside `preferredDirectory`.

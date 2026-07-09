@@ -103,4 +103,38 @@ struct MissingTracksServiceTests {
         let firstExpectedPath = SeratoLibraryLocator.seratoStoredPath(for: firstPreferredMatch, rootDirectory: scratch.tempRoot)
         #expect(reparsed.contains { $0.seratoStoredPath == firstExpectedPath })
     }
+
+    @Test func deleteFromLibraryRemovesTrackAndCandidate() async throws {
+        let oldBackupDirectory = SeratoBackupBeforeWrite.backupDirectory
+        let scratch = try makeScratchDatabaseCopy()
+        defer {
+            SeratoBackupBeforeWrite.backupDirectory = oldBackupDirectory
+            try? FileManager.default.removeItem(at: scratch.tempRoot)
+        }
+
+        SeratoBackupBeforeWrite.backupDirectory = scratch.tempRoot.appendingPathComponent("Backups")
+
+        let parseRoot = URL(fileURLWithPath: "/Volumes/Crucial X10")
+        let tracks = try SeratoDatabaseParser.parseTracks(at: scratch.databaseFile, rootDirectory: parseRoot)
+        let targetTrack = try #require(tracks.first)
+
+        let service = await MainActor.run {
+            MissingTracksService(rootDirectory: scratch.tempRoot, databaseFileURL: scratch.databaseFile)
+        }
+        await MainActor.run {
+            service.detectMissingTracks(in: [targetTrack])
+        }
+
+        let deleted = try await MainActor.run {
+            let targetCandidate = try #require(service.candidates.first)
+            return try service.deleteFromLibrary(targetCandidate, in: [])
+        }
+        #expect(deleted)
+
+        let remainingCandidateCount = await MainActor.run { service.candidates.count }
+        #expect(remainingCandidateCount == 0)
+
+        let reparsed = try SeratoDatabaseParser.parseTracks(at: scratch.databaseFile, rootDirectory: scratch.tempRoot)
+        #expect(!reparsed.contains { $0.seratoStoredPath == targetTrack.seratoStoredPath })
+    }
 }
