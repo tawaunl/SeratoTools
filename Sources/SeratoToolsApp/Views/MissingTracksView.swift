@@ -1,4 +1,5 @@
 import SwiftUI
+import AppKit
 import SeratoToolsCore
 
 struct MissingTracksView: View {
@@ -6,6 +7,9 @@ struct MissingTracksView: View {
     @EnvironmentObject private var missingTracksService: MissingTracksService
 
     @State private var resultMessage: String?
+    @State private var preferredLocationPath: String = ""
+
+    private static let preferredLocationDefaultsKey = "MissingTracksPreferredLocationPath"
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -35,14 +39,41 @@ struct MissingTracksView: View {
             }
             .padding()
 
+            HStack(spacing: 8) {
+                TextField("Preferred track location", text: $preferredLocationPath)
+                    .textFieldStyle(.roundedBorder)
+                Button("Browse…") {
+                    browseForPreferredLocation()
+                }
+                Button("Fix All (Preferred Location)") {
+                    fixAllUsingPreferredLocation()
+                }
+                .disabled(missingTracksService.candidates.isEmpty || preferredLocationDirectory == nil)
+            }
+            .padding(.horizontal)
+            .padding(.bottom, 8)
+
+            Text(preferredLocationSummaryText)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .padding(.horizontal)
+                .padding(.bottom, 6)
+
             List(missingTracksService.candidates) { candidate in
-                MissingTrackRow(candidate: candidate)
+                MissingTrackRow(
+                    candidate: candidate,
+                    preferredDirectory: preferredLocationDirectory
+                )
             }
             .background(Color(nsColor: .windowBackgroundColor))
         }
         .navigationTitle("Missing Tracks")
         .task {
             missingTracksService.detectMissingTracks(in: libraryService.tracks)
+            loadPreferredLocationIfNeeded()
+        }
+        .onChange(of: preferredLocationPath) {
+            UserDefaults.standard.set(preferredLocationPath, forKey: Self.preferredLocationDefaultsKey)
         }
         .alert(
             "Missing Tracks",
@@ -64,11 +95,87 @@ struct MissingTracksView: View {
             resultMessage = "Couldn't create the review crate: \(error.localizedDescription)"
         }
     }
+
+    private var preferredLocationDirectory: URL? {
+        let trimmed = preferredLocationPath.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return nil }
+        let url = URL(fileURLWithPath: trimmed)
+        var isDirectory: ObjCBool = false
+        guard FileManager.default.fileExists(atPath: url.path, isDirectory: &isDirectory), isDirectory.boolValue else {
+            return nil
+        }
+        return url
+    }
+
+    private func loadPreferredLocationIfNeeded() {
+        guard preferredLocationPath.isEmpty else { return }
+
+        if let saved = UserDefaults.standard.string(forKey: Self.preferredLocationDefaultsKey), !saved.isEmpty {
+            preferredLocationPath = saved
+            return
+        }
+
+        preferredLocationPath = FileManager.default.homeDirectoryForCurrentUser
+            .appendingPathComponent("Music", isDirectory: true)
+            .path
+    }
+
+    private func browseForPreferredLocation() {
+        let panel = NSOpenPanel()
+        panel.canChooseFiles = false
+        panel.canChooseDirectories = true
+        panel.canCreateDirectories = true
+        panel.allowsMultipleSelection = false
+        panel.prompt = "Choose"
+        panel.message = "Choose the folder where fixed tracks should be preferred from."
+        panel.directoryURL = preferredLocationDirectory ?? URL(fileURLWithPath: preferredLocationPath)
+
+        if panel.runModal() == .OK, let url = panel.url {
+            preferredLocationPath = url.path
+        }
+    }
+
+    private func fixAllUsingPreferredLocation() {
+        guard let preferredDirectory = preferredLocationDirectory else {
+            resultMessage = "Choose an existing preferred location first."
+            return
+        }
+
+        do {
+            let repairedCount = try missingTracksService.repairAllUsingPreferredLocation(preferredDirectory)
+            if repairedCount == 0 {
+                resultMessage = "No missing tracks had a match in \(preferredDirectory.path). Nothing was changed."
+            } else {
+                resultMessage = "Fixed \(repairedCount) tracks using matches found in \(preferredDirectory.path)."
+            }
+        } catch {
+            resultMessage = "Couldn't fix tracks from preferred location: \(error.localizedDescription)"
+        }
+    }
+
+    private var preferredLocationSummaryText: String {
+        guard let preferredDirectory = preferredLocationDirectory else {
+            return "Choose a preferred location to see eligible fixes."
+        }
+
+        let eligibleCount = missingTracksService.candidates.filter {
+            missingTracksService.preferredMatch(for: $0, preferredDirectory: preferredDirectory) != nil
+        }.count
+
+        if eligibleCount == 0 {
+            return "0 tracks currently match the preferred location."
+        }
+        if eligibleCount == 1 {
+            return "1 track can be fixed from the preferred location."
+        }
+        return "\(eligibleCount) tracks can be fixed from the preferred location."
+    }
 }
 
 private struct MissingTrackRow: View {
     @EnvironmentObject private var missingTracksService: MissingTracksService
     let candidate: MissingTrackCandidate
+    let preferredDirectory: URL?
 
     @State private var errorMessage: String?
 
@@ -98,17 +205,22 @@ private struct MissingTrackRow: View {
     // filenames), so nothing here is ever auto-applied.
     @ViewBuilder
     private var actionControl: some View {
-        switch candidate.matches.count {
-        case 0:
-            Text("No match found")
-                .font(.caption)
-                .foregroundStyle(.secondary)
-        case 1:
-            Button("Fix") { fix(using: candidate.matches[0]) }
-        default:
-            Menu("Fix (\(candidate.matches.count) matches)") {
-                ForEach(candidate.matches, id: \.self) { match in
-                    Button(match.path) { fix(using: match) }
+        if let preferredDirectory,
+           let preferredMatch = missingTracksService.preferredMatch(for: candidate, preferredDirectory: preferredDirectory) {
+            Button("Fix (Preferred)") { fix(using: preferredMatch) }
+        } else {
+            switch candidate.matches.count {
+            case 0:
+                Text("No match found")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            case 1:
+                Button("Fix") { fix(using: candidate.matches[0]) }
+            default:
+                Menu("Fix (\(candidate.matches.count) matches)") {
+                    ForEach(candidate.matches, id: \.self) { match in
+                        Button(match.path) { fix(using: match) }
+                    }
                 }
             }
         }
