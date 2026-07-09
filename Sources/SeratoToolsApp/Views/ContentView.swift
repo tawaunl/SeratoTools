@@ -55,6 +55,7 @@ struct ContentView: View {
     @State private var showDiscogsTokenSheet = false
     @State private var metadataSaveMessage: String?
     @State private var metadataSaveMessageTask: Task<Void, Never>?
+    @State private var activeAudioTrack: Track?
     @AppStorage(Self.confirmDeleteActionsDefaultsKey) private var confirmDeleteActions = true
 
     private var totalCratesCount: Int {
@@ -441,8 +442,20 @@ struct ContentView: View {
                         },
                         onSelectionChanged: { selected in
                             selectedTracksForActions = selected
+                            if selected.count != 1 {
+                                activeAudioTrack = nil
+                            }
+                        },
+                        onTrackActivated: { track in
+                            activeAudioTrack = track
                         }
                     )
+
+                    if let activeAudioTrack {
+                        TrackAudioPlayerPanel(track: activeAudioTrack)
+                            .padding(.horizontal, 8)
+                            .padding(.bottom, 8)
+                    }
                 }
             }
         case .playlistMatch:
@@ -553,6 +566,9 @@ struct ContentView: View {
     private func resetTransientFilters() {
         selectedTrackGenreFilter = nil
         crateListFilterMode = .all
+        if selectedSection != .tracks {
+            activeAudioTrack = nil
+        }
     }
 
     private func performOrConfirmQuickTrackDelete(_ action: QuickTrackDeleteAction) {

@@ -30,6 +30,7 @@ struct TrackTableView: View {
     let onDeleteRequested: (([Track]) -> Void)?
     let onMetadataEditRequested: ((Track, SeratoTrackMetadataUpdate) -> Void)?
     let onSelectionChanged: (([Track]) -> Void)?
+    let onTrackActivated: ((Track) -> Void)?
 
     @State private var searchText = ""
     @State private var selectedTrackIDs: Set<Track.ID> = []
@@ -44,13 +45,15 @@ struct TrackTableView: View {
         numberingMode: NumberingMode = .metadata,
         onDeleteRequested: (([Track]) -> Void)? = nil,
         onMetadataEditRequested: ((Track, SeratoTrackMetadataUpdate) -> Void)? = nil,
-        onSelectionChanged: (([Track]) -> Void)? = nil
+        onSelectionChanged: (([Track]) -> Void)? = nil,
+        onTrackActivated: ((Track) -> Void)? = nil
     ) {
         self.tracks = tracks
         self.numberingMode = numberingMode
         self.onDeleteRequested = onDeleteRequested
         self.onMetadataEditRequested = onMetadataEditRequested
         self.onSelectionChanged = onSelectionChanged
+        self.onTrackActivated = onTrackActivated
     }
 
     var body: some View {
@@ -76,7 +79,8 @@ struct TrackTableView: View {
                 dragPayloadForRow: { rowIndex, selectedIDs in
                     dragPayload(for: rowIndex, selectedIDs: selectedIDs)
                 },
-                onMetadataEditRequested: onMetadataEditRequested
+                onMetadataEditRequested: onMetadataEditRequested,
+                onTrackActivated: onTrackActivated
             )
         }
         .onAppear {
@@ -296,6 +300,7 @@ private struct TrackNSTableView: NSViewRepresentable {
     @Binding var sortAscending: Bool
     let dragPayloadForRow: (_ rowIndex: Int, _ selectedIDs: Set<Track.ID>) -> String
     let onMetadataEditRequested: ((Track, SeratoTrackMetadataUpdate) -> Void)?
+    let onTrackActivated: ((Track) -> Void)?
 
     func makeCoordinator() -> Coordinator {
         Coordinator(parent: self)
@@ -425,6 +430,13 @@ private struct TrackNSTableView: NSViewRepresentable {
                 return parent.tracks[row].id
             })
             parent.selectedTrackIDs = ids
+
+            if table.selectedRowIndexes.count == 1,
+               let row = table.selectedRowIndexes.first,
+               row >= 0,
+               row < parent.tracks.count {
+                parent.onTrackActivated?(parent.tracks[row])
+            }
         }
 
         func tableView(_ tableView: NSTableView, sortDescriptorsDidChange oldDescriptors: [NSSortDescriptor]) {
