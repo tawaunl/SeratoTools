@@ -305,7 +305,6 @@ private struct TrackNSTableView: NSViewRepresentable {
         table.intercellSpacing = NSSize(width: 6, height: 4)
         table.delegate = context.coordinator
         table.dataSource = context.coordinator
-        table.action = #selector(Coordinator.handleSingleClick(_:))
         table.target = context.coordinator
         table.doubleAction = #selector(Coordinator.handleDoubleClick(_:))
         table.registerForDraggedTypes([.string])
@@ -316,7 +315,9 @@ private struct TrackNSTableView: NSViewRepresentable {
             column.title = descriptor.title
             column.width = descriptor.width
             column.minWidth = descriptor.width
-            column.sortDescriptorPrototype = NSSortDescriptor(key: descriptor.id, ascending: true)
+            if descriptor.isSortable {
+                column.sortDescriptorPrototype = NSSortDescriptor(key: descriptor.id, ascending: true)
+            }
             table.addTableColumn(column)
         }
 
@@ -344,19 +345,21 @@ private struct TrackNSTableView: NSViewRepresentable {
         let id: String
         let title: String
         let width: CGFloat
+        let isSortable: Bool
 
         static let all: [ColumnDescriptor] = [
-            ColumnDescriptor(id: "number", title: "#", width: 50),
-            ColumnDescriptor(id: "title", title: "Title", width: 280),
-            ColumnDescriptor(id: "artist", title: "Artist", width: 190),
-            ColumnDescriptor(id: "album", title: "Album", width: 190),
-            ColumnDescriptor(id: "genre", title: "Genre", width: 150),
-            ColumnDescriptor(id: "year", title: "Year", width: 70),
-            ColumnDescriptor(id: "comment", title: "Comment", width: 240),
-            ColumnDescriptor(id: "color", title: "Color", width: 90),
-            ColumnDescriptor(id: "key", title: "Key", width: 70),
-            ColumnDescriptor(id: "bpm", title: "BPM", width: 70),
-            ColumnDescriptor(id: "duration", title: "Duration", width: 85)
+            ColumnDescriptor(id: "play", title: "", width: 34, isSortable: false),
+            ColumnDescriptor(id: "number", title: "#", width: 50, isSortable: true),
+            ColumnDescriptor(id: "title", title: "Title", width: 280, isSortable: true),
+            ColumnDescriptor(id: "artist", title: "Artist", width: 190, isSortable: true),
+            ColumnDescriptor(id: "album", title: "Album", width: 190, isSortable: true),
+            ColumnDescriptor(id: "genre", title: "Genre", width: 150, isSortable: true),
+            ColumnDescriptor(id: "year", title: "Year", width: 70, isSortable: true),
+            ColumnDescriptor(id: "comment", title: "Comment", width: 240, isSortable: true),
+            ColumnDescriptor(id: "color", title: "Color", width: 90, isSortable: true),
+            ColumnDescriptor(id: "key", title: "Key", width: 70, isSortable: true),
+            ColumnDescriptor(id: "bpm", title: "BPM", width: 70, isSortable: true),
+            ColumnDescriptor(id: "duration", title: "Duration", width: 85, isSortable: true)
         ]
     }
 
@@ -365,7 +368,6 @@ private struct TrackNSTableView: NSViewRepresentable {
         var parent: TrackNSTableView
         weak var tableView: NSTableView?
         private var applyingSortDescriptor = false
-        private var lastSingleClickedSelectionKey: String?
         private let editableColumnIDs: Set<String> = ["title", "artist", "album", "genre", "year", "comment", "key", "bpm"]
 
         init(parent: TrackNSTableView) {
@@ -380,6 +382,42 @@ private struct TrackNSTableView: NSViewRepresentable {
             guard row >= 0, row < parent.tracks.count, let tableColumn else { return nil }
             let track = parent.tracks[row]
             let columnID = tableColumn.identifier.rawValue
+
+            if columnID == "play" {
+                let identifier = NSUserInterfaceItemIdentifier("Cell_play")
+                let cell: NSTableCellView
+                let button: NSButton
+
+                if let reused = tableView.makeView(withIdentifier: identifier, owner: nil) as? NSTableCellView,
+                   let existingButton = reused.subviews.compactMap({ $0 as? NSButton }).first {
+                    cell = reused
+                    button = existingButton
+                } else {
+                    let newCell = NSTableCellView(frame: .zero)
+                    newCell.identifier = identifier
+
+                    let newButton = NSButton(frame: .zero)
+                    newButton.translatesAutoresizingMaskIntoConstraints = false
+                    newButton.image = NSImage(systemSymbolName: "play.fill", accessibilityDescription: "Play Track")
+                    newButton.isBordered = false
+                    newButton.contentTintColor = NSColor.controlAccentColor
+                    newButton.target = self
+                    newButton.action = #selector(handlePlayButton(_:))
+
+                    newCell.addSubview(newButton)
+                    NSLayoutConstraint.activate([
+                        newButton.centerXAnchor.constraint(equalTo: newCell.centerXAnchor),
+                        newButton.centerYAnchor.constraint(equalTo: newCell.centerYAnchor)
+                    ])
+
+                    cell = newCell
+                    button = newButton
+                }
+
+                button.tag = row
+                return cell
+            }
+
             let identifier = NSUserInterfaceItemIdentifier("Cell_\(columnID)")
             let allowsInlineEdit = editableColumnIDs.contains(columnID)
 
@@ -423,51 +461,6 @@ private struct TrackNSTableView: NSViewRepresentable {
                 return selectionKey(for: parent.tracks[row])
             })
             parent.selectedTrackKeys = keys
-
-            if table.selectedRowIndexes.count != 1 {
-                lastSingleClickedSelectionKey = nil
-            }
-        }
-
-        @objc func handleSingleClick(_ sender: Any?) {
-            guard let table = tableView else {
-                return
-            }
-
-            guard let event = NSApp.currentEvent,
-                  event.type == .leftMouseDown || event.type == .leftMouseUp,
-                  event.clickCount == 1
-            else {
-                return
-            }
-
-            if !event.modifierFlags.intersection([.shift, .command, .control, .option]).isEmpty {
-                return
-            }
-
-            let row = table.clickedRow
-            guard row >= 0,
-                  row < parent.tracks.count,
-                  table.selectedRowIndexes.count == 1,
-                  table.selectedRowIndexes.contains(row)
-            else {
-                return
-            }
-
-            let track = parent.tracks[row]
-            let key = selectionKey(for: track)
-
-            if lastSingleClickedSelectionKey == key {
-                let column = table.clickedColumn
-                if column >= 0 {
-                    let columnID = table.tableColumns[column].identifier.rawValue
-                    if editableColumnIDs.contains(columnID) {
-                        beginInlineEdit(row: row, column: column)
-                    }
-                }
-            }
-
-            lastSingleClickedSelectionKey = key
         }
 
         func tableView(_ tableView: NSTableView, sortDescriptorsDidChange oldDescriptors: [NSSortDescriptor]) {
@@ -487,8 +480,20 @@ private struct TrackNSTableView: NSViewRepresentable {
         @objc func handleDoubleClick(_ sender: Any?) {
             guard let table = tableView else { return }
             let row = table.clickedRow
-            guard row >= 0, row < parent.tracks.count else { return }
-            lastSingleClickedSelectionKey = selectionKey(for: parent.tracks[row])
+            let column = table.clickedColumn
+            guard row >= 0, row < parent.tracks.count, column >= 0 else { return }
+
+            let columnID = table.tableColumns[column].identifier.rawValue
+            guard editableColumnIDs.contains(columnID) else { return }
+            beginInlineEdit(row: row, column: column)
+        }
+
+        @objc func handlePlayButton(_ sender: NSButton) {
+            guard sender.tag >= 0, sender.tag < parent.tracks.count else { return }
+            guard let table = tableView else { return }
+
+            let row = sender.tag
+            table.selectRowIndexes(IndexSet(integer: row), byExtendingSelection: false)
             parent.onTrackActivated?(parent.tracks[row])
         }
 
@@ -584,6 +589,8 @@ private struct TrackNSTableView: NSViewRepresentable {
 
         private static func stringValue(for track: Track, columnID: String) -> String {
             switch columnID {
+            case "play":
+                return ""
             case "number":
                 return track.trackNumber.map(String.init) ?? "—"
             case "title":

@@ -5,6 +5,7 @@ import SeratoToolsCore
 struct AddMusicView: View {
     private enum CrateAssignmentMode: String, CaseIterable, Identifiable {
         case dated
+        case named
         case existing
         case none
 
@@ -14,6 +15,8 @@ struct AddMusicView: View {
             switch self {
             case .dated:
                 return "Dated Crate"
+            case .named:
+                return "Named Crate"
             case .existing:
                 return "Existing Crate"
             case .none:
@@ -66,7 +69,7 @@ struct AddMusicView: View {
 
     private var isCrateSelectionValid: Bool {
         switch crateAssignmentMode {
-        case .dated, .none:
+        case .dated, .named, .none:
             return true
         case .existing:
             return selectedExistingCrate != nil
@@ -101,7 +104,7 @@ struct AddMusicView: View {
         VStack(alignment: .leading, spacing: 8) {
             Text("Add Music")
                 .font(.system(size: 32, weight: .semibold, design: .default))
-            Text("Import files or folders into your main music folder, then create a fresh dated crate so the tracks are ready when you open Serato.")
+            Text("Import files or folders into your main music folder, then optionally create a new crate (dated or named) so tracks are ready when you open Serato.")
                 .foregroundStyle(.secondary)
 
             if let successMessage {
@@ -159,10 +162,19 @@ struct AddMusicView: View {
                     syncDestinationFolderToSeratoLibrary()
                 }
                 .disabled(isRunning || isSyncingFolder)
+
+                Image(systemName: "questionmark.circle")
+                    .foregroundStyle(.secondary)
+                    .overlay(alignment: .topTrailing) {
+                        FastHoverHelp(
+                            text: "Scans the selected folder for audio files and inserts missing tracks into Serato database V2. Existing tracks are left unchanged. It does not move/copy files or create crates."
+                        )
+                        .offset(x: 2, y: -2)
+                    }
             }
 
             HStack(spacing: 10) {
-                Text("Crate Name Prefix")
+                Text(crateAssignmentMode == .named ? "Crate Name" : "Crate Name Prefix")
                     .foregroundStyle(.secondary)
                 TextField("New Music", text: $cratePrefix)
                     .textFieldStyle(.roundedBorder)
@@ -200,9 +212,15 @@ struct AddMusicView: View {
                 }
             }
 
-            Text("Crate format: \(normalizedCratePrefix) YYYY-MM-DD")
-                .font(.footnote)
-                .foregroundStyle(.secondary)
+            if crateAssignmentMode == .dated {
+                Text("Crate format: \(normalizedCratePrefix) YYYY-MM-DD")
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+            } else if crateAssignmentMode == .named {
+                Text("Crate format: \(normalizedCratePrefix)")
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+            }
 
             if crateAssignmentMode == .none {
                 Text("No crate will be updated for this import.")
@@ -280,7 +298,17 @@ struct AddMusicView: View {
         if isRunning {
             return "Importing..."
         }
-        return transferMode == .move ? "Move + Create Dated Crate" : "Copy + Create Dated Crate"
+        let verb = transferMode == .move ? "Move" : "Copy"
+        switch crateAssignmentMode {
+        case .dated:
+            return "\(verb) + Create Dated Crate"
+        case .named:
+            return "\(verb) + Create Named Crate"
+        case .existing:
+            return "\(verb) + Add To Existing Crate"
+        case .none:
+            return "\(verb) + Import Only"
+        }
     }
 
     private var isImportDisabled: Bool {
@@ -357,24 +385,58 @@ struct AddMusicView: View {
         let selectedExistingCrate = selectedExistingCrate
         let transferMode = transferMode
         let subcratesDirectory = libraryService.subcratesDirectory
+        let databaseFileURL = libraryService.databaseFile
         let rootDirectory = libraryService.rootDirectory
 
         Task {
             do {
                 switch crateAssignmentMode {
                 case .dated:
-                    let result = try await Task.detached(priority: .userInitiated) {
-                        try AddMusicImportService.importIntoDatedCrate(
+                    let importedFiles = try await Task.detached(priority: .userInitiated) {
+                        try AddMusicImportService.importAudioFiles(
                             inputURLs: inputURLs,
                             destinationFolderURL: destinationFolder,
-                            crateNamePrefix: cratePrefix,
-                            transferMode: transferMode,
-                            subcratesDirectory: subcratesDirectory,
-                            rootDirectory: rootDirectory
+                            transferMode: transferMode
                         )
                     }.value
 
-                    successMessage = "Imported \(result.importedTrackCount) tracks and created crate \(result.crateName)."
+                    let crateResult = try AddMusicImportService.createDatedCrate(
+                        forAudioFiles: importedFiles.importedFileURLs,
+                        crateNamePrefix: cratePrefix,
+                        subcratesDirectory: subcratesDirectory,
+                        rootDirectory: rootDirectory
+                    )
+
+                    let syncResult = try LibraryFolderSyncService.syncAudioFiles(
+                        importedFiles.importedFileURLs,
+                        databaseFileURL: databaseFileURL,
+                        rootDirectory: rootDirectory
+                    )
+
+                    successMessage = "Imported \(importedFiles.importedTrackCount) tracks and created crate \(crateResult.crateName). Synced \(syncResult.insertedTracks) new DB entries."
+                case .named:
+                    let importedFiles = try await Task.detached(priority: .userInitiated) {
+                        try AddMusicImportService.importAudioFiles(
+                            inputURLs: inputURLs,
+                            destinationFolderURL: destinationFolder,
+                            transferMode: transferMode
+                        )
+                    }.value
+
+                    let crateResult = try AddMusicImportService.createNamedCrate(
+                        forAudioFiles: importedFiles.importedFileURLs,
+                        crateName: cratePrefix,
+                        subcratesDirectory: subcratesDirectory,
+                        rootDirectory: rootDirectory
+                    )
+
+                    let syncResult = try LibraryFolderSyncService.syncAudioFiles(
+                        importedFiles.importedFileURLs,
+                        databaseFileURL: databaseFileURL,
+                        rootDirectory: rootDirectory
+                    )
+
+                    successMessage = "Imported \(importedFiles.importedTrackCount) tracks and created crate \(crateResult.crateName). Synced \(syncResult.insertedTracks) new DB entries."
                 case .existing:
                     guard let selectedExistingCrate else {
                         throw AddMusicImportService.ImportError.missingCrateFileURL
@@ -393,7 +455,13 @@ struct AddMusicView: View {
                         rootDirectory: rootDirectory
                     )
 
-                    successMessage = "Imported \(importedFiles.importedTrackCount) tracks and saved to crate \(crateResult.crateName)."
+                    let syncResult = try LibraryFolderSyncService.syncAudioFiles(
+                        importedFiles.importedFileURLs,
+                        databaseFileURL: databaseFileURL,
+                        rootDirectory: rootDirectory
+                    )
+
+                    successMessage = "Imported \(importedFiles.importedTrackCount) tracks and saved to crate \(crateResult.crateName). Synced \(syncResult.insertedTracks) new DB entries."
                 case .none:
                     let importedFiles = try await Task.detached(priority: .userInitiated) {
                         try AddMusicImportService.importAudioFiles(
@@ -403,7 +471,13 @@ struct AddMusicView: View {
                         )
                     }.value
 
-                    successMessage = "Imported \(importedFiles.importedTrackCount) tracks with no crate assignment."
+                    let syncResult = try LibraryFolderSyncService.syncAudioFiles(
+                        importedFiles.importedFileURLs,
+                        databaseFileURL: databaseFileURL,
+                        rootDirectory: rootDirectory
+                    )
+
+                    successMessage = "Imported \(importedFiles.importedTrackCount) tracks with no crate assignment. Synced \(syncResult.insertedTracks) new DB entries."
                 }
 
                 onLibraryChanged()
@@ -444,5 +518,48 @@ struct AddMusicView: View {
 
             isSyncingFolder = false
         }
+    }
+}
+
+private struct FastHoverHelp: View {
+    let text: String
+
+    @State private var isHovering = false
+    @State private var showPopover = false
+    @State private var hoverTask: Task<Void, Never>?
+
+    var body: some View {
+        Rectangle()
+            .fill(Color.clear)
+            .frame(width: 14, height: 14)
+            .contentShape(Rectangle())
+            .onHover { hovering in
+                isHovering = hovering
+                hoverTask?.cancel()
+
+                if hovering {
+                    hoverTask = Task { @MainActor in
+                        try? await Task.sleep(nanoseconds: 80_000_000)
+                        guard !Task.isCancelled, isHovering else { return }
+                        withAnimation(.easeOut(duration: 0.1)) {
+                            showPopover = true
+                        }
+                    }
+                } else {
+                    withAnimation(.easeOut(duration: 0.08)) {
+                        showPopover = false
+                    }
+                }
+            }
+            .onDisappear {
+                hoverTask?.cancel()
+                hoverTask = nil
+            }
+            .popover(isPresented: $showPopover, arrowEdge: .top) {
+                Text(text)
+                    .font(.caption)
+                    .frame(maxWidth: 300, alignment: .leading)
+                    .padding(10)
+            }
     }
 }

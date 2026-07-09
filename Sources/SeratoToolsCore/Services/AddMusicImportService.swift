@@ -214,6 +214,39 @@ public enum AddMusicImportService {
         )
     }
 
+    public static func createNamedCrate(
+        forAudioFiles audioFiles: [URL],
+        crateName: String,
+        subcratesDirectory: URL,
+        rootDirectory: URL,
+        fileManager: FileManager = .default
+    ) throws -> CrateCreationResult {
+        guard !audioFiles.isEmpty else {
+            throw ImportError.noSupportedAudioFiles
+        }
+
+        let existingFiles = audioFiles
+            .map(\.standardizedFileURL)
+            .filter { fileManager.fileExists(atPath: $0.path) }
+        guard !existingFiles.isEmpty else {
+            throw ImportError.noSupportedAudioFiles
+        }
+
+        let storedPaths = existingFiles.map {
+            SeratoLibraryLocator.seratoStoredPath(for: $0, rootDirectory: rootDirectory)
+        }
+        let uniqueName = uniqueNamedCrateName(baseName: crateName, subcratesDirectory: subcratesDirectory, fileManager: fileManager)
+        let crateURL = subcratesDirectory.appendingPathComponent(uniqueName).appendingPathExtension("crate")
+        let crateData = SeratoCrateWriter.makeCrateData(trackPaths: storedPaths)
+        try AtomicFileWriter.write(crateData, to: crateURL)
+
+        return CrateCreationResult(
+            crateFileURL: crateURL,
+            crateName: uniqueName,
+            trackCount: storedPaths.count
+        )
+    }
+
     public static func appendAudioFiles(
         _ audioFiles: [URL],
         toExistingCrate crate: Crate,
@@ -270,6 +303,24 @@ public enum AddMusicImportService {
         fileManager: FileManager
     ) -> String {
         let base = datedName(prefix: prefix, date: date)
+        return uniqueCrateName(base: base, subcratesDirectory: subcratesDirectory, fileManager: fileManager)
+    }
+
+    private static func uniqueNamedCrateName(
+        baseName: String,
+        subcratesDirectory: URL,
+        fileManager: FileManager
+    ) -> String {
+        let normalizedBase = baseName.trimmingCharacters(in: .whitespacesAndNewlines)
+        let safeBase = normalizedBase.isEmpty ? "New Music" : normalizedBase
+        return uniqueCrateName(base: safeBase, subcratesDirectory: subcratesDirectory, fileManager: fileManager)
+    }
+
+    private static func uniqueCrateName(
+        base: String,
+        subcratesDirectory: URL,
+        fileManager: FileManager
+    ) -> String {
         var candidate = base
         var suffix = 2
 

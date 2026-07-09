@@ -56,9 +56,32 @@ public enum LibraryFolderSyncService {
             throw SyncError.databaseNotFound(databaseFileURL)
         }
 
-        let audioFiles = AddMusicImportService.discoverAudioFiles(from: [folderURL], fileManager: fileManager)
-        guard !audioFiles.isEmpty else {
+        let discovered = AddMusicImportService.discoverAudioFiles(from: [folderURL], fileManager: fileManager)
+        guard !discovered.isEmpty else {
             throw SyncError.noSupportedAudioFiles(folderURL)
+        }
+
+        return try syncAudioFiles(
+            discovered,
+            databaseFileURL: databaseFileURL,
+            rootDirectory: rootDirectory,
+            fileManager: fileManager
+        )
+    }
+
+    public static func syncAudioFiles(
+        _ audioFiles: [URL],
+        databaseFileURL: URL,
+        rootDirectory: URL,
+        fileManager: FileManager = .default
+    ) throws -> SyncResult {
+        guard fileManager.fileExists(atPath: databaseFileURL.path) else {
+            throw SyncError.databaseNotFound(databaseFileURL)
+        }
+
+        let normalizedAudioFiles = normalizedSupportedExistingFiles(audioFiles, fileManager: fileManager)
+        guard !normalizedAudioFiles.isEmpty else {
+            throw SyncError.noSupportedAudioFiles(databaseFileURL.deletingLastPathComponent())
         }
 
         try SeratoBackupBeforeWrite.snapshot(of: databaseFileURL)
@@ -67,9 +90,13 @@ public enum LibraryFolderSyncService {
         var inserted = 0
         var alreadyPresent = 0
 
-        for fileURL in audioFiles {
+        for fileURL in normalizedAudioFiles {
             let storedPath = SeratoLibraryLocator.seratoStoredPath(for: fileURL, rootDirectory: rootDirectory)
-            let ensured = SeratoDatabaseWriter.ensuringTrackExists(forStoredPath: storedPath, in: data)
+            let ensured = SeratoDatabaseWriter.ensuringTrackExists(
+                forStoredPath: storedPath,
+                metadata: fallbackMetadata(fromFilename: fileURL),
+                in: data
+            )
             data = ensured.data
             if ensured.didInsert {
                 inserted += 1
@@ -83,9 +110,181 @@ public enum LibraryFolderSyncService {
         }
 
         return SyncResult(
-            scannedAudioFiles: audioFiles.count,
+            scannedAudioFiles: normalizedAudioFiles.count,
             insertedTracks: inserted,
             alreadyPresentTracks: alreadyPresent
         )
+    }
+
+    private static func fallbackMetadata(fromFilename fileURL: URL) -> SeratoTrackMetadataUpdate {
+        let rawBaseName = fileURL.deletingPathExtension().lastPathComponent
+        let normalized = normalizeFilenameComponent(rawBaseName)
+        let (artistGuess, titleGuess) = splitArtistAndTitle(from: normalized)
+
+        return SeratoTrackMetadataUpdate(
+            title: titleGuess,
+            artist: artistGuess,
+            album: "",
+            genre: "",
+            comment: "",
+            key: "",
+            bpm: nil,
+            year: nil
+        )
+    }
+
+    private static func splitArtistAndTitle(from baseName: String) -> (artist: String, title: String) {
+        let separators = [" - ", " – ", " — ", " | ", " : "]
+        for separator in separators {
+            let parts = baseName.components(separatedBy: separator)
+            guard parts.count >= 2 else { continue }
+
+            let artist = normalizeArtistGuess(normalizeFilenameComponent(parts[0]))
+            let title = normalizeTitleGuess(normalizeFilenameComponent(parts.dropFirst().joined(separator: separator)))
+            if !title.isEmpty {
+                return (artist: artist, title: title)
+            }
+        }
+
+        // Support compact patterns like "Artist-Title" when spaced separators aren't present.
+        if !baseName.contains(" - "), let compactRange = baseName.range(of: "-") {
+            let left = normalizeArtistGuess(normalizeFilenameComponent(String(baseName[..<compactRange.lowerBound])))
+            let right = normalizeTitleGuess(normalizeFilenameComponent(String(baseName[compactRange.upperBound...])))
+            if !left.isEmpty, !right.isEmpty,
+               left.rangeOfCharacter(from: .letters) != nil,
+               right.rangeOfCharacter(from: .letters) != nil {
+                return (artist: left, title: right)
+            }
+        }
+
+        return (artist: "", title: normalizeTitleGuess(baseName))
+    }
+
+    private static func normalizeFilenameComponent(_ raw: String) -> String {
+        var value = raw.replacingOccurrences(of: "_", with: " ")
+
+        // Strip common leading index prefixes like "01 - " or "1. ".
+        let indexPattern = #"^\s*\d{1,3}(?:\s*[-._)]\s*|\s+)"#
+        value = value.replacingOccurrences(of: indexPattern, with: "", options: .regularExpression)
+
+        value = value.replacingOccurrences(of: #"\s+"#, with: " ", options: .regularExpression)
+        return value.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    private static func normalizeArtistGuess(_ raw: String) -> String {
+        var value = raw
+        value = value.replacingOccurrences(of: #"\s+feat\.?\s+"#, with: " feat. ", options: [.regularExpression, .caseInsensitive])
+        value = value.replacingOccurrences(of: #"\s+ft\.?\s+"#, with: " feat. ", options: [.regularExpression, .caseInsensitive])
+        value = value.replacingOccurrences(of: #"\s+"#, with: " ", options: .regularExpression)
+        return value.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    private static func normalizeTitleGuess(_ raw: String) -> String {
+        var value = raw
+
+        value = removeInlineNoisyBracketDescriptors(from: value)
+
+        // Strip common non-title download noise while keeping meaningful mix/remix info.
+        while true {
+            let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
+            if removeTrailingBracketDescriptorIfNoisy(from: &value) {
+                value = value.trimmingCharacters(in: .whitespacesAndNewlines)
+                continue
+            }
+            if removeTrailingInlineNoiseIfPresent(from: &value) {
+                value = value.trimmingCharacters(in: .whitespacesAndNewlines)
+                continue
+            }
+            if value.trimmingCharacters(in: .whitespacesAndNewlines) == trimmed {
+                break
+            }
+        }
+
+        value = value.replacingOccurrences(of: #"\s+"#, with: " ", options: .regularExpression)
+        return value.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    private static func removeInlineNoisyBracketDescriptors(from value: String) -> String {
+        let pattern = #"\s*[\(\[\{]\s*(official(\s+(video|audio))?|music\s+video|lyric(s)?(\s+video)?|visualizer|audio|video|hq|hd|4k|free\s+download|out\s+now|intro|clean|dirty|explicit)\s*[\)\]\}]"#
+        return value.replacingOccurrences(of: pattern, with: "", options: [.regularExpression, .caseInsensitive])
+    }
+
+    private static func removeTrailingBracketDescriptorIfNoisy(from value: inout String) -> Bool {
+        guard let range = value.range(of: #"\s*[\(\[\{]([^\)\]\}]*)[\)\]\}]\s*$"#, options: .regularExpression) else {
+            return false
+        }
+
+        let segment = String(value[range])
+        let descriptor = segment
+            .replacingOccurrences(of: #"^[\s\(\[\{]+"#, with: "", options: .regularExpression)
+            .replacingOccurrences(of: #"[\s\)\]\}]+$"#, with: "", options: .regularExpression)
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+
+        guard shouldStripTrailingNoiseDescriptor(descriptor) else {
+            return false
+        }
+
+        value.removeSubrange(range)
+        return true
+    }
+
+    private static func removeTrailingInlineNoiseIfPresent(from value: inout String) -> Bool {
+        let pattern = #"\s*[-–—|:]\s*(official\s+(video|audio)|music\s+video|lyric(s)?\s*(video)?|visualizer|audio|video|hq|hd|4k|free\s+download|out\s+now)\s*$"#
+        guard let range = value.range(of: pattern, options: [.regularExpression, .caseInsensitive]) else {
+            return false
+        }
+        value.removeSubrange(range)
+        return true
+    }
+
+    private static func shouldStripTrailingNoiseDescriptor(_ descriptor: String) -> Bool {
+        let normalized = descriptor
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .lowercased()
+
+        if normalized.isEmpty {
+            return true
+        }
+
+        let noisyPatterns = [
+            #"^official(\s+(video|audio))?$"#,
+            #"^music\s+video$"#,
+            #"^lyric(s)?(\s+video)?$"#,
+            #"^visualizer$"#,
+            #"^audio$"#,
+            #"^video$"#,
+            #"^hq$"#,
+            #"^hd$"#,
+            #"^4k$"#,
+            #"^free\s+download$"#,
+            #"^out\s+now$"#,
+            #"^intro$"#,
+            #"^clean$"#,
+            #"^dirty$"#,
+            #"^explicit$"#
+        ]
+
+        return noisyPatterns.contains { pattern in
+            normalized.range(of: pattern, options: .regularExpression) != nil
+        }
+    }
+
+    private static func normalizedSupportedExistingFiles(_ files: [URL], fileManager: FileManager) -> [URL] {
+        var seen = Set<String>()
+        var output: [URL] = []
+
+        for file in files {
+            let normalized = file.standardizedFileURL
+            guard AddMusicImportService.supportedAudioExtensions.contains(normalized.pathExtension.lowercased()) else {
+                continue
+            }
+            guard fileManager.fileExists(atPath: normalized.path) else { continue }
+
+            if seen.insert(normalized.path).inserted {
+                output.append(normalized)
+            }
+        }
+
+        return output.sorted { $0.path.localizedStandardCompare($1.path) == .orderedAscending }
     }
 }

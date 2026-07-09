@@ -46,6 +46,7 @@ struct TagsBulkEditView: View {
     @EnvironmentObject private var libraryService: LibraryService
 
     let onApplyMetadata: (Track, SeratoTrackMetadataUpdate) throws -> Void
+    let onApplyMetadataBatch: (([(Track, SeratoTrackMetadataUpdate)]) throws -> Void)?
 
     @State private var selectedScopeID: String = Self.allTracksID
     @State private var selectedTracks: [Track] = []
@@ -59,6 +60,8 @@ struct TagsBulkEditView: View {
     @State private var isBulkLookupRunning = false
     @State private var bulkLookupMessage: String?
     @State private var operationErrorMessage: String?
+    @State private var pendingTopHitUpdates: [(Track, SeratoTrackMetadataUpdate)] = []
+    @State private var showTopHitConfirmation = false
 
     private var regularTree: [CrateNode] {
         CrateHierarchy.build(from: libraryService.crates)
@@ -195,6 +198,20 @@ struct TagsBulkEditView: View {
                 try onApplyMetadata(track, metadata)
             }
         }
+        .confirmationDialog(
+            "Apply Top-Hit Metadata",
+            isPresented: $showTopHitConfirmation,
+            titleVisibility: .visible
+        ) {
+            Button("Apply to \(pendingTopHitUpdates.count) Track\(pendingTopHitUpdates.count == 1 ? "" : "s")") {
+                applyPendingTopHitUpdates()
+            }
+            Button("Cancel", role: .cancel) {
+                pendingTopHitUpdates = []
+            }
+        } message: {
+            Text("Top search-hit metadata will be applied for Artist, Album, Genre, and Year on \(pendingTopHitUpdates.count) selected track\(pendingTopHitUpdates.count == 1 ? "" : "s").")
+        }
     }
 
     private var crateListPane: some View {
@@ -289,6 +306,10 @@ struct TagsBulkEditView: View {
                     lookupMissingGenreAndYear()
                 }
                 .disabled(selectedTracks.isEmpty || isBulkLookupRunning)
+                Button("Apply Top Hit (A/Al/G/Y)") {
+                    applyTopHitMetadataToSelected()
+                }
+                .disabled(selectedTracks.isEmpty || isBulkLookupRunning)
                 if isBulkLookupRunning {
                     ProgressView()
                         .controlSize(.small)
@@ -379,6 +400,8 @@ struct TagsBulkEditView: View {
             return
         }
 
+        var updates: [(Track, SeratoTrackMetadataUpdate)] = []
+
         for track in selectedTracks {
             var metadata = SeratoTrackMetadataUpdate(
                 title: track.title,
@@ -404,12 +427,28 @@ struct TagsBulkEditView: View {
                 metadata.year = yearValue
             }
 
-            do {
-                try onApplyMetadata(track, metadata)
-            } catch {
-                operationErrorMessage = error.localizedDescription
-                return
+            guard metadata.artist != track.artist
+                || metadata.album != track.album
+                || metadata.genre != track.genre
+                || metadata.year != track.year
+            else {
+                continue
             }
+
+            updates.append((track, metadata))
+        }
+
+        do {
+            if let onApplyMetadataBatch {
+                try onApplyMetadataBatch(updates)
+            } else {
+                for (track, metadata) in updates {
+                    try onApplyMetadata(track, metadata)
+                }
+            }
+        } catch {
+            operationErrorMessage = error.localizedDescription
+            return
         }
     }
 
@@ -477,12 +516,17 @@ struct TagsBulkEditView: View {
                     updates.append((item.track, metadata))
                 }
 
-                var updatedCount = 0
-                for (track, metadata) in updates {
+                let updatedCount = updates.count
+                if updatedCount > 0 {
                     try await MainActor.run {
-                        try onApplyMetadata(track, metadata)
+                        if let onApplyMetadataBatch {
+                            try onApplyMetadataBatch(updates)
+                        } else {
+                            for (track, metadata) in updates {
+                                try onApplyMetadata(track, metadata)
+                            }
+                        }
                     }
-                    updatedCount += 1
                 }
 
                 await MainActor.run {
@@ -497,6 +541,123 @@ struct TagsBulkEditView: View {
                     operationErrorMessage = error.localizedDescription
                 }
             }
+        }
+    }
+
+    private func applyTopHitMetadataToSelected() {
+        guard !selectedTracks.isEmpty else { return }
+
+        bulkLookupMessage = nil
+        operationErrorMessage = nil
+        isBulkLookupRunning = true
+
+        let tracksSnapshot = selectedTracks
+        let onlyFillEmptySnapshot = onlyFillEmpty
+        let lookupItems: [(key: String, track: Track, query: OnlineTrackMetadataLookupService.Query)] = tracksSnapshot.map { track in
+            (
+                key: bulkLookupKey(for: track),
+                track: track,
+                query: OnlineTrackMetadataLookupService.Query(
+                    title: track.title,
+                    artist: track.artist,
+                    album: track.album
+                )
+            )
+        }
+
+        Task.detached(priority: .userInitiated) {
+            do {
+                let candidateMap = try await Self.fetchBulkLookupCandidates(
+                    for: lookupItems.map { ($0.key, $0.query) }
+                )
+
+                var updates: [(Track, SeratoTrackMetadataUpdate)] = []
+                for item in lookupItems {
+                    guard let candidate = candidateMap[item.key] else {
+                        continue
+                    }
+
+                    var metadata = SeratoTrackMetadataUpdate(
+                        title: item.track.title,
+                        artist: item.track.artist,
+                        album: item.track.album,
+                        genre: item.track.genre,
+                        comment: item.track.comment,
+                        key: item.track.key ?? "",
+                        bpm: item.track.bpm,
+                        year: item.track.year
+                    )
+
+                    if !candidate.artist.isEmpty,
+                              (!onlyFillEmptySnapshot || item.track.artist.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty) {
+                        metadata.artist = candidate.artist
+                    }
+                    if !candidate.album.isEmpty,
+                              (!onlyFillEmptySnapshot || item.track.album.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty) {
+                        metadata.album = candidate.album
+                    }
+                    if !candidate.genre.isEmpty,
+                              (!onlyFillEmptySnapshot || item.track.genre.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty) {
+                        metadata.genre = candidate.genre
+                    }
+                    if let year = candidate.year,
+                              (!onlyFillEmptySnapshot || item.track.year == nil) {
+                        metadata.year = year
+                    }
+
+                    guard metadata.artist != item.track.artist
+                        || metadata.album != item.track.album
+                        || metadata.genre != item.track.genre
+                        || metadata.year != item.track.year
+                    else {
+                        continue
+                    }
+
+                    updates.append((item.track, metadata))
+                }
+
+                await MainActor.run {
+                    isBulkLookupRunning = false
+                    if updates.isEmpty {
+                        bulkLookupMessage = "No top-hit metadata updates were applied."
+                        pendingTopHitUpdates = []
+                    } else {
+                        pendingTopHitUpdates = updates
+                        showTopHitConfirmation = true
+                    }
+                }
+            } catch {
+                await MainActor.run {
+                    isBulkLookupRunning = false
+                    operationErrorMessage = error.localizedDescription
+                }
+            }
+        }
+    }
+
+    private func applyPendingTopHitUpdates() {
+        guard !pendingTopHitUpdates.isEmpty else { return }
+
+        let updates = pendingTopHitUpdates
+        pendingTopHitUpdates = []
+        bulkLookupMessage = nil
+        operationErrorMessage = nil
+
+        let updatedCount = updates.count
+        do {
+            if let onApplyMetadataBatch {
+                try onApplyMetadataBatch(updates)
+            } else {
+                for (track, metadata) in updates {
+                    try onApplyMetadata(track, metadata)
+                }
+            }
+        } catch {
+            operationErrorMessage = error.localizedDescription
+        }
+
+        if operationErrorMessage == nil {
+            bulkLookupMessage = "Applied top-hit artist/album/genre/year to \(updatedCount) track\(updatedCount == 1 ? "" : "s")."
         }
     }
 

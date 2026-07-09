@@ -42,6 +42,18 @@ public final class LibraryService: ObservableObject {
         }
     }
 
+    public func reloadTracksOnly() throws {
+        let rootDirectory = SeratoLibraryLocator.rootDirectory(for: libraryDirectory)
+        do {
+            tracks = try SeratoDatabaseParser.parseTracks(at: databaseFile, rootDirectory: rootDirectory)
+            reloadErrorMessage = nil
+        } catch {
+            tracks = []
+            reloadErrorMessage = error.localizedDescription
+            throw error
+        }
+    }
+
     public func setLibraryDirectory(_ newDirectory: URL) {
         libraryDirectory = newDirectory
     }

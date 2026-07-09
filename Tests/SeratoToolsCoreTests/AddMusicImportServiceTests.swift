@@ -130,3 +130,47 @@ private func makeScratchImportEnvironment() throws -> (tempRoot: URL, libraryDir
     #expect(FileManager.default.fileExists(atPath: result.crateFileURL.path))
     #expect(!FileManager.default.fileExists(atPath: incomingFile.path))
 }
+
+@Test func createNamedCrateUsesExactNameWithoutDate() throws {
+    let env = try makeScratchImportEnvironment()
+    defer { try? FileManager.default.removeItem(at: env.tempRoot) }
+
+    let imported = env.destinationRoot.appendingPathComponent("Named Song.mp3")
+    try Data("named".utf8).write(to: imported)
+
+    let rootDirectory = SeratoLibraryLocator.rootDirectory(for: env.libraryDirectory, homeDirectory: env.tempRoot)
+
+    let result = try AddMusicImportService.createNamedCrate(
+        forAudioFiles: [imported],
+        crateName: "Weekend Set",
+        subcratesDirectory: env.subcratesDirectory,
+        rootDirectory: rootDirectory
+    )
+
+    #expect(result.crateName == "Weekend Set")
+    #expect(FileManager.default.fileExists(atPath: result.crateFileURL.path))
+    #expect(result.crateFileURL.lastPathComponent == "Weekend Set.crate")
+}
+
+@Test func createNamedCrateAppendsSuffixWhenNameExists() throws {
+    let env = try makeScratchImportEnvironment()
+    defer { try? FileManager.default.removeItem(at: env.tempRoot) }
+
+    let imported = env.destinationRoot.appendingPathComponent("Named Song.mp3")
+    try Data("named".utf8).write(to: imported)
+
+    let existingCrateURL = env.subcratesDirectory.appendingPathComponent("Weekend Set").appendingPathExtension("crate")
+    try AtomicFileWriter.write(Data(), to: existingCrateURL)
+
+    let rootDirectory = SeratoLibraryLocator.rootDirectory(for: env.libraryDirectory, homeDirectory: env.tempRoot)
+
+    let result = try AddMusicImportService.createNamedCrate(
+        forAudioFiles: [imported],
+        crateName: "Weekend Set",
+        subcratesDirectory: env.subcratesDirectory,
+        rootDirectory: rootDirectory
+    )
+
+    #expect(result.crateName == "Weekend Set (2)")
+    #expect(result.crateFileURL.lastPathComponent == "Weekend Set (2).crate")
+}

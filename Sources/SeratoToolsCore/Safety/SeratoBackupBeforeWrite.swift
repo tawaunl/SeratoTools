@@ -25,13 +25,35 @@ public enum SeratoBackupBeforeWrite {
 
         let formatter = ISO8601DateFormatter()
         formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
-        let stampedName = "\(formatter.string(from: timestamp))-\(fileURL.lastPathComponent)"
-            .replacingOccurrences(of: ":", with: "-")
-        let destination = backupDirectory.appendingPathComponent(stampedName)
+        let timestampStamp = formatter.string(from: timestamp).replacingOccurrences(of: ":", with: "-")
+        let sourceName = fileURL.lastPathComponent
 
-        try FileManager.default.copyItem(at: fileURL, to: destination)
-        try pruneOldSnapshots(forSourceNamed: fileURL.lastPathComponent)
-        return destination
+        for attempt in 1...500 {
+            let candidateName: String
+            if attempt == 1 {
+                candidateName = "\(timestampStamp)-\(sourceName)"
+            } else {
+                candidateName = "\(timestampStamp)-\(attempt)-\(sourceName)"
+            }
+
+            let destination = backupDirectory.appendingPathComponent(candidateName)
+            do {
+                try FileManager.default.copyItem(at: fileURL, to: destination)
+                try pruneOldSnapshots(forSourceNamed: fileURL.lastPathComponent)
+                return destination
+            } catch {
+                let nsError = error as NSError
+                let isAlreadyExists = (nsError.domain == NSCocoaErrorDomain && nsError.code == NSFileWriteFileExistsError)
+                    || (nsError.domain == NSPOSIXErrorDomain && nsError.code == EEXIST)
+
+                if isAlreadyExists {
+                    continue
+                }
+                throw error
+            }
+        }
+
+        throw CocoaError(.fileWriteFileExists)
     }
 
     private static func pruneOldSnapshots(forSourceNamed sourceName: String) throws {

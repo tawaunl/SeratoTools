@@ -471,9 +471,14 @@ struct ContentView: View {
         case .youtubeRip:
             YouTubeRipView(onLibraryChanged: reloadLibrary)
         case .tags:
-            TagsBulkEditView(onApplyMetadata: { track, metadata in
-                try saveTrackMetadataEdit(track: track, metadata: metadata)
-            })
+            TagsBulkEditView(
+                onApplyMetadata: { track, metadata in
+                    try saveTrackMetadataEdit(track: track, metadata: metadata)
+                },
+                onApplyMetadataBatch: { updates in
+                    try saveTrackMetadataEditsBatch(updates)
+                }
+            )
         case .missingTracks:
             MissingTracksView()
         case .backup:
@@ -667,7 +672,23 @@ struct ContentView: View {
             databaseFileURL: libraryService.databaseFile,
             rewriteFilenameFromMetadata: SeratoFeatureFlags.isAutoRenameFromMetadataEnabled()
         )
-        reloadLibrary()
+        try libraryService.reloadTracksOnly()
+        showMetadataSaveSuccess()
+    }
+
+    private func saveTrackMetadataEditsBatch(_ updates: [(Track, SeratoTrackMetadataUpdate)]) throws {
+        guard !updates.isEmpty else { return }
+
+        for (track, metadata) in updates {
+            try SeratoTrackMetadataEditor.update(
+                track: track,
+                metadata: metadata,
+                databaseFileURL: libraryService.databaseFile,
+                rewriteFilenameFromMetadata: SeratoFeatureFlags.isAutoRenameFromMetadataEnabled()
+            )
+        }
+
+        try libraryService.reloadTracksOnly()
         showMetadataSaveSuccess()
     }
 
