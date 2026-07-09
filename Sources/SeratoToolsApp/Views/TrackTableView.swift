@@ -33,9 +33,8 @@ struct TrackTableView: View {
     let onTrackActivated: ((Track) -> Void)?
 
     @State private var searchText = ""
-    @State private var selectedTrackIDs: Set<Track.ID> = []
+    @State private var selectedTrackKeys: Set<String> = []
     @State private var displayedTracks: [Track] = []
-    @State private var displayedPathByID: [Track.ID: String] = [:]
     @State private var recomputeTask: Task<Void, Never>?
     @State private var sortColumn: SortColumn = .number
     @State private var sortAscending = true
@@ -68,7 +67,7 @@ struct TrackTableView: View {
 
             TrackNSTableView(
                 tracks: displayedTracks,
-                selectedTrackIDs: $selectedTrackIDs,
+                selectedTrackKeys: $selectedTrackKeys,
                 sortColumn: Binding(
                     get: { sortColumn.rawValue },
                     set: { newValue in
@@ -76,8 +75,8 @@ struct TrackTableView: View {
                     }
                 ),
                 sortAscending: $sortAscending,
-                dragPayloadForRow: { rowIndex, selectedIDs in
-                    dragPayload(for: rowIndex, selectedIDs: selectedIDs)
+                dragPayloadForRow: { rowIndex, selectedKeys in
+                    dragPayload(for: rowIndex, selectedKeys: selectedKeys)
                 },
                 onMetadataEditRequested: onMetadataEditRequested,
                 onTrackActivated: onTrackActivated
@@ -113,21 +112,21 @@ struct TrackTableView: View {
         }
         .onDeleteCommand {
             guard let onDeleteRequested else { return }
-            let selected = displayedTracks.filter { selectedTrackIDs.contains($0.id) }
+            let selected = displayedTracks.filter { selectedTrackKeys.contains(selectionKey(for: $0)) }
             guard !selected.isEmpty else { return }
             onDeleteRequested(selected)
         }
-        .onChange(of: selectedTrackIDs) {
+        .onChange(of: selectedTrackKeys) {
             notifySelectionChanged()
         }
-        .onChange(of: displayedTracks.map(\.id)) {
+        .onChange(of: displayedTracks.map(selectionKey(for:))) {
             notifySelectionChanged()
         }
     }
 
     private func notifySelectionChanged() {
         guard let onSelectionChanged else { return }
-        let selected = displayedTracks.filter { selectedTrackIDs.contains($0.id) }
+        let selected = displayedTracks.filter { selectedTrackKeys.contains(selectionKey(for: $0)) }
         onSelectionChanged(selected)
     }
 
@@ -139,24 +138,6 @@ struct TrackTableView: View {
         let inputSortColumn = sortColumn
         let inputSortAscending = sortAscending
         let inputNumberingMode = numberingMode
-
-        let seedTracks: [Track]
-        switch inputNumberingMode {
-        case .metadata:
-            seedTracks = inputTracks
-        case .listOrder:
-            seedTracks = inputTracks.enumerated().map { index, track in
-                var track = track
-                track.trackNumber = index + 1
-                return track
-            }
-        }
-
-        displayedTracks = seedTracks
-        displayedPathByID = Dictionary(
-            seedTracks.map { ($0.id, $0.seratoStoredPath) },
-            uniquingKeysWith: { first, _ in first }
-        )
 
         recomputeTask = Task(priority: .userInitiated) {
             if debounce {
@@ -175,12 +156,8 @@ struct TrackTableView: View {
             guard !Task.isCancelled else { return }
             await MainActor.run {
                 displayedTracks = result
-                displayedPathByID = Dictionary(
-                    result.map { ($0.id, $0.seratoStoredPath) },
-                    uniquingKeysWith: { first, _ in first }
-                )
-                let validIDs = Set(result.map(\.id))
-                selectedTrackIDs = selectedTrackIDs.intersection(validIDs)
+                let validKeys = Set(result.map(selectionKey(for:)))
+                selectedTrackKeys = selectedTrackKeys.intersection(validKeys)
             }
         }
     }
@@ -264,14 +241,16 @@ struct TrackTableView: View {
         }
     }
 
-    private func dragPayload(for rowIndex: Int, selectedIDs: Set<Track.ID>) -> String {
+    private func dragPayload(for rowIndex: Int, selectedKeys: Set<String>) -> String {
         guard rowIndex >= 0, rowIndex < displayedTracks.count else {
             return ""
         }
 
         let rowTrack = displayedTracks[rowIndex]
-        if selectedIDs.contains(rowTrack.id) {
-            let selectedPaths = selectedIDs.compactMap { displayedPathByID[$0] }
+        if selectedKeys.contains(selectionKey(for: rowTrack)) {
+            let selectedPaths = displayedTracks
+                .filter { selectedKeys.contains(selectionKey(for: $0)) }
+                .map(\.seratoStoredPath)
             if !selectedPaths.isEmpty {
                 return TrackDragPayload.encodeMany(paths: selectedPaths)
             }
@@ -291,14 +270,21 @@ struct TrackTableView: View {
         let seconds = Int(duration) % 60
         return String(format: "%d:%02d", minutes, seconds)
     }
+
+    fileprivate func selectionKey(for track: Track) -> String {
+        track.seratoStoredPath
+            .replacingOccurrences(of: "\\\\", with: "/")
+            .trimmingCharacters(in: CharacterSet(charactersIn: "/"))
+            .lowercased()
+    }
 }
 
 private struct TrackNSTableView: NSViewRepresentable {
     let tracks: [Track]
-    @Binding var selectedTrackIDs: Set<Track.ID>
+    @Binding var selectedTrackKeys: Set<String>
     @Binding var sortColumn: String
     @Binding var sortAscending: Bool
-    let dragPayloadForRow: (_ rowIndex: Int, _ selectedIDs: Set<Track.ID>) -> String
+    let dragPayloadForRow: (_ rowIndex: Int, _ selectedKeys: Set<String>) -> String
     let onMetadataEditRequested: ((Track, SeratoTrackMetadataUpdate) -> Void)?
     let onTrackActivated: ((Track) -> Void)?
 
@@ -425,11 +411,11 @@ private struct TrackNSTableView: NSViewRepresentable {
 
         func tableViewSelectionDidChange(_ notification: Notification) {
             guard let table = tableView else { return }
-            let ids = Set<Track.ID>(table.selectedRowIndexes.compactMap { row in
+            let keys = Set<String>(table.selectedRowIndexes.compactMap { row in
                 guard row >= 0, row < parent.tracks.count else { return nil }
-                return parent.tracks[row].id
+                return selectionKey(for: parent.tracks[row])
             })
-            parent.selectedTrackIDs = ids
+            parent.selectedTrackKeys = keys
 
             if table.selectedRowIndexes.count == 1,
                let row = table.selectedRowIndexes.first,
@@ -446,7 +432,7 @@ private struct TrackNSTableView: NSViewRepresentable {
         }
 
         func tableView(_ tableView: NSTableView, pasteboardWriterForRow row: Int) -> (any NSPasteboardWriting)? {
-            let payload = parent.dragPayloadForRow(row, parent.selectedTrackIDs)
+            let payload = parent.dragPayloadForRow(row, parent.selectedTrackKeys)
             if payload.isEmpty {
                 return nil
             }
@@ -518,7 +504,7 @@ private struct TrackNSTableView: NSViewRepresentable {
         func restoreSelectionIfNeeded() {
             guard let table = tableView else { return }
             let targetIndexes = IndexSet(parent.tracks.enumerated().compactMap { index, track in
-                parent.selectedTrackIDs.contains(track.id) ? index : nil
+                parent.selectedTrackKeys.contains(selectionKey(for: track)) ? index : nil
             })
 
             guard table.selectedRowIndexes != targetIndexes else { return }
@@ -529,6 +515,13 @@ private struct TrackNSTableView: NSViewRepresentable {
             }
 
             table.selectRowIndexes(targetIndexes, byExtendingSelection: false)
+        }
+
+        private func selectionKey(for track: Track) -> String {
+            track.seratoStoredPath
+                .replacingOccurrences(of: "\\\\", with: "/")
+                .trimmingCharacters(in: CharacterSet(charactersIn: "/"))
+                .lowercased()
         }
 
         func applySortDescriptor(columnID: String, ascending: Bool) {
