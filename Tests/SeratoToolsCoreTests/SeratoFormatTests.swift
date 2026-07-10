@@ -7,6 +7,22 @@ private func fixture(_ path: String) -> URL {
         .appendingPathComponent(path)
 }
 
+private func makeMetadataRenameEnvironment() throws -> (tempRoot: URL, libraryDirectory: URL, databaseFile: URL) {
+    let tempRoot = FileManager.default.temporaryDirectory
+        .appendingPathComponent("serato-metadata-rename-test-\(UUID().uuidString)", isDirectory: true)
+    let libraryDirectory = tempRoot.appendingPathComponent("_Serato_", isDirectory: true)
+    let sourceFixtureRoot = Bundle.module.url(forResource: "Fixtures/RealLibrarySample", withExtension: nil)!
+
+    try FileManager.default.createDirectory(at: tempRoot, withIntermediateDirectories: true)
+    try FileManager.default.copyItem(at: sourceFixtureRoot, to: libraryDirectory)
+
+    return (
+        tempRoot: tempRoot,
+        libraryDirectory: libraryDirectory,
+        databaseFile: libraryDirectory.appendingPathComponent("database V2")
+    )
+}
+
 @Test func parsesRealDatabaseFixture() throws {
     let databaseFile = fixture("database V2")
     let rootDirectory = URL(fileURLWithPath: "/Volumes/Crucial X10")
@@ -76,4 +92,53 @@ private func fixture(_ path: String) -> URL {
     let paths = ["Imported/Track One.mp3", "Imported/Track Two.mp3"]
     let data = SeratoCrateWriter.makeCrateData(trackPaths: paths)
     #expect(SeratoCrateParser.trackPaths(from: data) == paths)
+}
+
+@Test func metadataRenameRewritesDatabaseAndCratePaths() throws {
+    let env = try makeMetadataRenameEnvironment()
+    defer { try? FileManager.default.removeItem(at: env.tempRoot) }
+
+    let rootDirectory = SeratoLibraryLocator.rootDirectory(for: env.libraryDirectory)
+    let crateURL = env.libraryDirectory.appendingPathComponent("Subcrates/Mike's Party.crate")
+    let crate = try SeratoCrateParser.parseCrate(at: crateURL)
+    let oldStoredPath = try #require(crate.trackPaths.first)
+
+    let originalTracks = try SeratoDatabaseParser.parseTracks(at: env.databaseFile, rootDirectory: rootDirectory)
+    let targetTrack = try #require(originalTracks.first(where: { $0.seratoStoredPath == oldStoredPath }))
+
+    try FileManager.default.createDirectory(
+        at: targetTrack.fileURL.deletingLastPathComponent(),
+        withIntermediateDirectories: true
+    )
+    try Data("audio".utf8).write(to: targetTrack.fileURL)
+
+    let metadata = SeratoTrackMetadataUpdate(
+        title: "TitleRen",
+        artist: "ArtistRen",
+        album: "AlbumRen",
+        genre: "GenreRen",
+        comment: targetTrack.comment,
+        key: targetTrack.key ?? "",
+        bpm: targetTrack.bpm,
+        year: 2026
+    )
+
+    try SeratoTrackMetadataEditor.update(
+        track: targetTrack,
+        metadata: metadata,
+        databaseFileURL: env.databaseFile,
+        rewriteFilenameFromMetadata: true
+    )
+
+    let expectedFilename = "ArtistRen-TitleRen-AlbumRen-2026-GenreRen.\(targetTrack.fileURL.pathExtension)"
+    let expectedFileURL = targetTrack.fileURL.deletingLastPathComponent().appendingPathComponent(expectedFilename)
+    let expectedStoredPath = SeratoLibraryLocator.seratoStoredPath(for: expectedFileURL, rootDirectory: rootDirectory)
+
+    let reparsedTracks = try SeratoDatabaseParser.parseTracks(at: env.databaseFile, rootDirectory: rootDirectory)
+    #expect(reparsedTracks.contains(where: { $0.seratoStoredPath == expectedStoredPath }))
+    #expect(!reparsedTracks.contains(where: { $0.seratoStoredPath == oldStoredPath }))
+
+    let reparsedCrate = try SeratoCrateParser.parseCrate(at: crateURL)
+    #expect(reparsedCrate.trackPaths.contains(expectedStoredPath))
+    #expect(!reparsedCrate.trackPaths.contains(oldStoredPath))
 }

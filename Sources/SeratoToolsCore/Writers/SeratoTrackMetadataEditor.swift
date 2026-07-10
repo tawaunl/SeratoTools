@@ -334,12 +334,13 @@ public enum SeratoTrackMetadataEditor {
     }
 
     private static func proposedRenamedFileURL(for fileURL: URL, metadata: SeratoTrackMetadataUpdate) -> URL? {
-        let title = sanitizeFilenameComponent(metadata.title)
         let artist = sanitizeFilenameComponent(metadata.artist)
+        let title = sanitizeFilenameComponent(metadata.title)
         let album = sanitizeFilenameComponent(metadata.album)
         let year = metadata.year.map(String.init).map(sanitizeFilenameComponent) ?? ""
+        let genre = sanitizeFilenameComponent(metadata.genre)
 
-        let components = [title, artist, album, year].filter { !$0.isEmpty }
+        let components = [artist, title, album, year, genre].filter { !$0.isEmpty }
         guard !components.isEmpty else { return nil }
 
         let baseName = components.joined(separator: "-")

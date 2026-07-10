@@ -473,10 +473,10 @@ struct ContentView: View {
         case .tags:
             TagsBulkEditView(
                 onApplyMetadata: { track, metadata in
-                    try saveTrackMetadataEditInline(track: track, metadata: metadata)
+                    try saveTrackMetadataEdit(track: track, metadata: metadata)
                 },
                 onApplyMetadataBatch: { updates in
-                    try saveTrackMetadataEditsBatchInline(updates)
+                    try saveTrackMetadataEditsBatch(updates)
                 }
             )
         case .missingTracks:
@@ -659,21 +659,10 @@ struct ContentView: View {
 
     private func applyTrackMetadataEdit(track: Track, metadata: SeratoTrackMetadataUpdate) {
         do {
-            try saveTrackMetadataEditInline(track: track, metadata: metadata)
+            try saveTrackMetadataEdit(track: track, metadata: metadata)
         } catch {
             trackDeleteErrorMessage = error.localizedDescription
         }
-    }
-
-    private func saveTrackMetadataEditInline(track: Track, metadata: SeratoTrackMetadataUpdate) throws {
-        try SeratoTrackMetadataEditor.update(
-            track: track,
-            metadata: metadata,
-            databaseFileURL: libraryService.databaseFile,
-            rewriteFilenameFromMetadata: false
-        )
-        try libraryService.reloadTracksOnly()
-        showMetadataSaveSuccess()
     }
 
     private func saveTrackMetadataEdit(track: Track, metadata: SeratoTrackMetadataUpdate) throws {
@@ -703,21 +692,6 @@ struct ContentView: View {
         showMetadataSaveSuccess()
     }
 
-    private func saveTrackMetadataEditsBatchInline(_ updates: [(Track, SeratoTrackMetadataUpdate)]) throws {
-        guard !updates.isEmpty else { return }
-
-        for (track, metadata) in updates {
-            try SeratoTrackMetadataEditor.update(
-                track: track,
-                metadata: metadata,
-                databaseFileURL: libraryService.databaseFile,
-                rewriteFilenameFromMetadata: false
-            )
-        }
-
-        try libraryService.reloadTracksOnly()
-        showMetadataSaveSuccess()
-    }
 
     private func showMetadataSaveSuccess() {
         metadataSaveMessage = "Tag updated and saved."
