@@ -20,7 +20,7 @@ struct AddMusicView: View {
             case .existing:
                 return "Existing Crate"
             case .none:
-                return "No Crate"
+                return "No Additional Crate"
             }
         }
     }
@@ -32,6 +32,8 @@ struct AddMusicView: View {
     @State private var selectedInputURLs: [URL] = []
     @AppStorage(SeratoFeatureFlags.mainMusicFolderDefaultsKey) private var destinationPath = ""
     @State private var cratePrefix = "New Music"
+    @AppStorage(SeratoFeatureFlags.addMusicUsesCentralCrateDefaultsKey) private var usesCentralCrate = false
+    @AppStorage(SeratoFeatureFlags.addMusicCentralCrateIDDefaultsKey) private var selectedCentralCrateIDRaw = ""
     @State private var crateAssignmentMode: CrateAssignmentMode = .dated
     @State private var selectedExistingCrateID: UUID?
     @State private var transferMode: AddMusicImportService.TransferMode = .move
@@ -67,12 +69,24 @@ struct AddMusicView: View {
         return availableCrates.first { $0.id == selectedExistingCrateID }
     }
 
+    private var selectedCentralCrate: Crate? {
+        guard let selectedCentralCrateID else { return nil }
+        return availableCrates.first { $0.id == selectedCentralCrateID }
+    }
+
+    private var selectedCentralCrateID: UUID? {
+        get { UUID(uuidString: selectedCentralCrateIDRaw) }
+        nonmutating set { selectedCentralCrateIDRaw = newValue?.uuidString ?? "" }
+    }
+
     private var isCrateSelectionValid: Bool {
+        let isCentralCrateValid = !usesCentralCrate || selectedCentralCrate != nil
+
         switch crateAssignmentMode {
         case .dated, .named, .none:
-            return true
+            return isCentralCrateValid
         case .existing:
-            return selectedExistingCrate != nil
+            return isCentralCrateValid && selectedExistingCrate != nil
         }
     }
 
@@ -90,6 +104,7 @@ struct AddMusicView: View {
             if destinationPath.isEmpty {
                 destinationPath = defaultDestinationFolderURL.path
             }
+            ensureDefaultCrateSelections()
             refreshDiscoveredCount()
         }
         .onChange(of: crateAssignmentMode) {
@@ -98,13 +113,19 @@ struct AddMusicView: View {
                 selectedExistingCrateID = availableCrates.first?.id
             }
         }
+        .onChange(of: usesCentralCrate) {
+            guard usesCentralCrate else { return }
+            if selectedCentralCrateID == nil {
+                selectedCentralCrateID = availableCrates.first?.id
+            }
+        }
     }
 
     private var heroCard: some View {
         VStack(alignment: .leading, spacing: 8) {
             Text("Add Music")
                 .font(.system(size: 32, weight: .semibold, design: .default))
-            Text("Import files or folders into your main music folder, then optionally create a new crate (dated or named) so tracks are ready when you open Serato.")
+            Text("Import files or folders into your main music folder, then optionally add them to your central crate workflow and also create or update another crate.")
                 .foregroundStyle(.secondary)
 
             if let successMessage {
@@ -173,21 +194,51 @@ struct AddMusicView: View {
                     }
             }
 
-            HStack(spacing: 10) {
-                Text(crateAssignmentMode == .named ? "Crate Name" : "Crate Name Prefix")
+            Toggle("Use central crate for Add Music", isOn: $usesCentralCrate)
+
+            if usesCentralCrate {
+                HStack(spacing: 10) {
+                    Picker(
+                        "Central Crate",
+                        selection: Binding(
+                            get: { selectedCentralCrateID?.uuidString ?? "" },
+                            set: { newValue in
+                                selectedCentralCrateID = UUID(uuidString: newValue)
+                            }
+                        )
+                    ) {
+                        Text("Select Crate").tag("")
+                        ForEach(availableCrates, id: \.id) { crate in
+                            Text(crate.pathComponents.joined(separator: " / "))
+                                .tag(crate.id.uuidString)
+                        }
+                    }
+                    .frame(maxWidth: 420)
+                    Spacer(minLength: 0)
+                }
+
+                Text("When enabled, every Add Music import goes into this crate first, even if you also create or update another crate.")
+                    .font(.footnote)
                     .foregroundStyle(.secondary)
-                TextField("New Music", text: $cratePrefix)
-                    .textFieldStyle(.roundedBorder)
             }
 
             HStack(spacing: 10) {
-                Picker("Crate Assignment", selection: $crateAssignmentMode) {
+                Picker("Additional Crate", selection: $crateAssignmentMode) {
                     ForEach(CrateAssignmentMode.allCases) { mode in
                         Text(mode.displayName).tag(mode)
                     }
                 }
                 .frame(maxWidth: 220)
                 Spacer(minLength: 0)
+            }
+
+            if crateAssignmentMode == .dated || crateAssignmentMode == .named {
+                HStack(spacing: 10) {
+                    Text(crateAssignmentMode == .named ? "Crate Name" : "Crate Name Prefix")
+                        .foregroundStyle(.secondary)
+                    TextField("New Music", text: $cratePrefix)
+                        .textFieldStyle(.roundedBorder)
+                }
             }
 
             if crateAssignmentMode == .existing {
@@ -220,9 +271,13 @@ struct AddMusicView: View {
                 Text("Crate format: \(normalizedCratePrefix)")
                     .font(.footnote)
                     .foregroundStyle(.secondary)
+            } else if crateAssignmentMode == .none, usesCentralCrate {
+                Text("Tracks will be added to the selected central crate only.")
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
             }
 
-            if crateAssignmentMode == .none {
+            if crateAssignmentMode == .none, !usesCentralCrate {
                 Text("No crate will be updated for this import.")
                     .font(.footnote)
                     .foregroundStyle(.secondary)
@@ -299,6 +354,15 @@ struct AddMusicView: View {
             return "Importing..."
         }
         let verb = transferMode == .move ? "Move" : "Copy"
+        if usesCentralCrate {
+            switch crateAssignmentMode {
+            case .none:
+                return "\(verb) + Add To Central Crate"
+            default:
+                return "\(verb) + Update Crates"
+            }
+        }
+
         switch crateAssignmentMode {
         case .dated:
             return "\(verb) + Create Dated Crate"
@@ -371,6 +435,63 @@ struct AddMusicView: View {
         discoveredAudioCount = AddMusicImportService.discoverAudioFiles(from: selectedInputURLs).count
     }
 
+    private func ensureDefaultCrateSelections() {
+        if crateAssignmentMode == .existing, selectedExistingCrateID == nil {
+            selectedExistingCrateID = availableCrates.first?.id
+        }
+
+        if usesCentralCrate, selectedCentralCrateID == nil {
+            selectedCentralCrateID = availableCrates.first?.id
+        }
+    }
+
+    private func crateAssignments(
+        cratePrefix: String,
+        usesCentralCrate: Bool,
+        selectedCentralCrate: Crate?,
+        crateAssignmentMode: CrateAssignmentMode,
+        selectedExistingCrate: Crate?
+    ) throws -> [AddMusicImportService.CrateAssignment] {
+        var assignments: [AddMusicImportService.CrateAssignment] = []
+
+        if usesCentralCrate {
+            guard let selectedCentralCrate else {
+                throw AddMusicImportService.ImportError.missingCrateFileURL
+            }
+            assignments.append(.existing(selectedCentralCrate))
+        }
+
+        switch crateAssignmentMode {
+        case .dated:
+            assignments.append(.dated(prefix: cratePrefix))
+        case .named:
+            assignments.append(.named(cratePrefix))
+        case .existing:
+            guard let selectedExistingCrate else {
+                throw AddMusicImportService.ImportError.missingCrateFileURL
+            }
+            assignments.append(.existing(selectedExistingCrate))
+        case .none:
+            break
+        }
+
+        return assignments
+    }
+
+    private func successMessage(
+        importedTrackCount: Int,
+        crateResults: [AddMusicImportService.CrateCreationResult],
+        insertedTracks: Int
+    ) -> String {
+        guard !crateResults.isEmpty else {
+            return "Imported \(importedTrackCount) tracks with no crate assignment. Synced \(insertedTracks) new DB entries."
+        }
+
+        let crateNames = crateResults.map(\.crateName).joined(separator: ", ")
+        let noun = crateResults.count == 1 ? "crate" : "crates"
+        return "Imported \(importedTrackCount) tracks and updated \(noun) \(crateNames). Synced \(insertedTracks) new DB entries."
+    }
+
     private func runImport() {
         guard !isImportDisabled else { return }
 
@@ -381,6 +502,8 @@ struct AddMusicView: View {
         let inputURLs = selectedInputURLs
         let destinationFolder = destinationFolderURL
         let cratePrefix = normalizedCratePrefix
+        let usesCentralCrate = usesCentralCrate
+        let selectedCentralCrate = selectedCentralCrate
         let crateAssignmentMode = crateAssignmentMode
         let selectedExistingCrate = selectedExistingCrate
         let transferMode = transferMode
@@ -390,95 +513,40 @@ struct AddMusicView: View {
 
         Task {
             do {
-                switch crateAssignmentMode {
-                case .dated:
-                    let importedFiles = try await Task.detached(priority: .userInitiated) {
-                        try AddMusicImportService.importAudioFiles(
-                            inputURLs: inputURLs,
-                            destinationFolderURL: destinationFolder,
-                            transferMode: transferMode
-                        )
-                    }.value
+                let assignments = try crateAssignments(
+                    cratePrefix: cratePrefix,
+                    usesCentralCrate: usesCentralCrate,
+                    selectedCentralCrate: selectedCentralCrate,
+                    crateAssignmentMode: crateAssignmentMode,
+                    selectedExistingCrate: selectedExistingCrate
+                )
 
-                    let crateResult = try AddMusicImportService.createDatedCrate(
-                        forAudioFiles: importedFiles.importedFileURLs,
-                        crateNamePrefix: cratePrefix,
-                        subcratesDirectory: subcratesDirectory,
-                        rootDirectory: rootDirectory
+                let importedFiles = try await Task.detached(priority: .userInitiated) {
+                    try AddMusicImportService.importAudioFiles(
+                        inputURLs: inputURLs,
+                        destinationFolderURL: destinationFolder,
+                        transferMode: transferMode
                     )
+                }.value
 
-                    let syncResult = try LibraryFolderSyncService.syncAudioFiles(
-                        importedFiles.importedFileURLs,
-                        databaseFileURL: databaseFileURL,
-                        rootDirectory: rootDirectory
-                    )
+                let crateResults = try AddMusicImportService.assignAudioFiles(
+                    importedFiles.importedFileURLs,
+                    assignments: assignments,
+                    subcratesDirectory: subcratesDirectory,
+                    rootDirectory: rootDirectory
+                )
 
-                    successMessage = "Imported \(importedFiles.importedTrackCount) tracks and created crate \(crateResult.crateName). Synced \(syncResult.insertedTracks) new DB entries."
-                case .named:
-                    let importedFiles = try await Task.detached(priority: .userInitiated) {
-                        try AddMusicImportService.importAudioFiles(
-                            inputURLs: inputURLs,
-                            destinationFolderURL: destinationFolder,
-                            transferMode: transferMode
-                        )
-                    }.value
+                let syncResult = try LibraryFolderSyncService.syncAudioFiles(
+                    importedFiles.importedFileURLs,
+                    databaseFileURL: databaseFileURL,
+                    rootDirectory: rootDirectory
+                )
 
-                    let crateResult = try AddMusicImportService.createNamedCrate(
-                        forAudioFiles: importedFiles.importedFileURLs,
-                        crateName: cratePrefix,
-                        subcratesDirectory: subcratesDirectory,
-                        rootDirectory: rootDirectory
-                    )
-
-                    let syncResult = try LibraryFolderSyncService.syncAudioFiles(
-                        importedFiles.importedFileURLs,
-                        databaseFileURL: databaseFileURL,
-                        rootDirectory: rootDirectory
-                    )
-
-                    successMessage = "Imported \(importedFiles.importedTrackCount) tracks and created crate \(crateResult.crateName). Synced \(syncResult.insertedTracks) new DB entries."
-                case .existing:
-                    guard let selectedExistingCrate else {
-                        throw AddMusicImportService.ImportError.missingCrateFileURL
-                    }
-                    let importedFiles = try await Task.detached(priority: .userInitiated) {
-                        try AddMusicImportService.importAudioFiles(
-                            inputURLs: inputURLs,
-                            destinationFolderURL: destinationFolder,
-                            transferMode: transferMode
-                        )
-                    }.value
-
-                    let crateResult = try AddMusicImportService.appendAudioFiles(
-                        importedFiles.importedFileURLs,
-                        toExistingCrate: selectedExistingCrate,
-                        rootDirectory: rootDirectory
-                    )
-
-                    let syncResult = try LibraryFolderSyncService.syncAudioFiles(
-                        importedFiles.importedFileURLs,
-                        databaseFileURL: databaseFileURL,
-                        rootDirectory: rootDirectory
-                    )
-
-                    successMessage = "Imported \(importedFiles.importedTrackCount) tracks and saved to crate \(crateResult.crateName). Synced \(syncResult.insertedTracks) new DB entries."
-                case .none:
-                    let importedFiles = try await Task.detached(priority: .userInitiated) {
-                        try AddMusicImportService.importAudioFiles(
-                            inputURLs: inputURLs,
-                            destinationFolderURL: destinationFolder,
-                            transferMode: transferMode
-                        )
-                    }.value
-
-                    let syncResult = try LibraryFolderSyncService.syncAudioFiles(
-                        importedFiles.importedFileURLs,
-                        databaseFileURL: databaseFileURL,
-                        rootDirectory: rootDirectory
-                    )
-
-                    successMessage = "Imported \(importedFiles.importedTrackCount) tracks with no crate assignment. Synced \(syncResult.insertedTracks) new DB entries."
-                }
+                successMessage = successMessage(
+                    importedTrackCount: importedFiles.importedTrackCount,
+                    crateResults: crateResults,
+                    insertedTracks: syncResult.insertedTracks
+                )
 
                 onLibraryChanged()
                 selectedInputURLs = []
@@ -495,6 +563,9 @@ struct AddMusicView: View {
         let folderURL = destinationFolderURL
         let databaseFileURL = libraryService.databaseFile
         let rootDirectory = libraryService.rootDirectory
+        let subcratesDirectory = libraryService.subcratesDirectory
+        let usesCentralCrate = usesCentralCrate
+        let selectedCentralCrate = selectedCentralCrate
 
         isSyncingFolder = true
         errorMessage = nil
@@ -502,6 +573,7 @@ struct AddMusicView: View {
 
         Task {
             do {
+                let discoveredAudioFiles = AddMusicImportService.discoverAudioFiles(from: [folderURL])
                 let result = try await Task.detached(priority: .userInitiated) {
                     try LibraryFolderSyncService.syncAudioFolder(
                         folderURL,
@@ -510,7 +582,26 @@ struct AddMusicView: View {
                     )
                 }.value
 
-                successMessage = "Scanned \(result.scannedAudioFiles) files. Inserted \(result.insertedTracks), already in library \(result.alreadyPresentTracks)."
+                var crateResults: [AddMusicImportService.CrateCreationResult] = []
+                if usesCentralCrate {
+                    guard let selectedCentralCrate else {
+                        throw AddMusicImportService.ImportError.missingCrateFileURL
+                    }
+
+                    crateResults = try AddMusicImportService.assignAudioFiles(
+                        discoveredAudioFiles,
+                        assignments: [.existing(selectedCentralCrate)],
+                        subcratesDirectory: subcratesDirectory,
+                        rootDirectory: rootDirectory
+                    )
+                }
+
+                let baseMessage = "Scanned \(result.scannedAudioFiles) files. Inserted \(result.insertedTracks), already in library \(result.alreadyPresentTracks)."
+                if let crateName = crateResults.first?.crateName {
+                    successMessage = "\(baseMessage) Added tracks to crate \(crateName)."
+                } else {
+                    successMessage = baseMessage
+                }
                 onLibraryChanged()
             } catch {
                 errorMessage = error.localizedDescription

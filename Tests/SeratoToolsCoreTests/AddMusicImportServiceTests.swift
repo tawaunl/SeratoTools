@@ -174,3 +174,70 @@ private func makeScratchImportEnvironment() throws -> (tempRoot: URL, libraryDir
     #expect(result.crateName == "Weekend Set (2)")
     #expect(result.crateFileURL.lastPathComponent == "Weekend Set (2).crate")
 }
+
+@Test func assignAudioFilesUpdatesCentralCrateAndCreatesSecondaryCrate() throws {
+    let env = try makeScratchImportEnvironment()
+    defer { try? FileManager.default.removeItem(at: env.tempRoot) }
+
+    let rootDirectory = SeratoLibraryLocator.rootDirectory(for: env.libraryDirectory, homeDirectory: env.tempRoot)
+
+    let existingTrack = env.destinationRoot.appendingPathComponent("Existing Song.mp3")
+    let importedTrack = env.destinationRoot.appendingPathComponent("Imported Song.mp3")
+    try Data("existing".utf8).write(to: existingTrack)
+    try Data("imported".utf8).write(to: importedTrack)
+
+    let centralCrateURL = env.subcratesDirectory.appendingPathComponent("All Music").appendingPathExtension("crate")
+    let existingStoredPath = SeratoLibraryLocator.seratoStoredPath(for: existingTrack, rootDirectory: rootDirectory)
+    let centralData = SeratoCrateWriter.makeCrateData(trackPaths: [existingStoredPath])
+    try AtomicFileWriter.write(centralData, to: centralCrateURL)
+
+    let centralCrate = try SeratoCrateParser.parseCrate(at: centralCrateURL)
+
+    let results = try AddMusicImportService.assignAudioFiles(
+        [importedTrack],
+        assignments: [
+            .existing(centralCrate),
+            .named("Fresh Finds")
+        ],
+        subcratesDirectory: env.subcratesDirectory,
+        rootDirectory: rootDirectory
+    )
+
+    #expect(results.count == 2)
+
+    let updatedCentralCrate = try SeratoCrateParser.parseCrate(at: centralCrateURL)
+    let freshFindsURL = env.subcratesDirectory.appendingPathComponent("Fresh Finds").appendingPathExtension("crate")
+    let freshFindsCrate = try SeratoCrateParser.parseCrate(at: freshFindsURL)
+    let importedStoredPath = SeratoLibraryLocator.seratoStoredPath(for: importedTrack, rootDirectory: rootDirectory)
+
+    #expect(Set(updatedCentralCrate.trackPaths) == Set([existingStoredPath, importedStoredPath]))
+    #expect(freshFindsCrate.trackPaths == [importedStoredPath])
+}
+
+@Test func assignAudioFilesSkipsDuplicateExistingCrateAssignments() throws {
+    let env = try makeScratchImportEnvironment()
+    defer { try? FileManager.default.removeItem(at: env.tempRoot) }
+
+    let rootDirectory = SeratoLibraryLocator.rootDirectory(for: env.libraryDirectory, homeDirectory: env.tempRoot)
+
+    let importedTrack = env.destinationRoot.appendingPathComponent("Imported Song.mp3")
+    try Data("imported".utf8).write(to: importedTrack)
+
+    let centralCrateURL = env.subcratesDirectory.appendingPathComponent("All Music").appendingPathExtension("crate")
+    try AtomicFileWriter.write(Data(), to: centralCrateURL)
+
+    let centralCrate = try SeratoCrateParser.parseCrate(at: centralCrateURL)
+
+    let results = try AddMusicImportService.assignAudioFiles(
+        [importedTrack],
+        assignments: [
+            .existing(centralCrate),
+            .existing(centralCrate)
+        ],
+        subcratesDirectory: env.subcratesDirectory,
+        rootDirectory: rootDirectory
+    )
+
+    #expect(results.count == 1)
+    #expect(results.first?.crateName == "All Music")
+}

@@ -66,6 +66,12 @@ public enum AddMusicImportService {
         public let trackCount: Int
     }
 
+    public enum CrateAssignment: Sendable {
+        case dated(prefix: String)
+        case named(String)
+        case existing(Crate)
+    }
+
     // Common DJ-library audio formats.
     public static let supportedAudioExtensions: Set<String> = [
         "mp3", "m4a", "aac", "wav", "aif", "aiff", "flac", "alac", "ogg"
@@ -284,8 +290,68 @@ public enum AddMusicImportService {
         )
     }
 
+    public static func assignAudioFiles(
+        _ audioFiles: [URL],
+        assignments: [CrateAssignment],
+        subcratesDirectory: URL,
+        rootDirectory: URL,
+        date: Date = Date(),
+        fileManager: FileManager = .default
+    ) throws -> [CrateCreationResult] {
+        var results: [CrateCreationResult] = []
+        var processedExistingCrates = Set<String>()
+
+        for assignment in assignments {
+            switch assignment {
+            case let .dated(prefix):
+                let result = try createDatedCrate(
+                    forAudioFiles: audioFiles,
+                    crateNamePrefix: prefix,
+                    subcratesDirectory: subcratesDirectory,
+                    rootDirectory: rootDirectory,
+                    date: date,
+                    fileManager: fileManager
+                )
+                results.append(result)
+
+            case let .named(name):
+                let result = try createNamedCrate(
+                    forAudioFiles: audioFiles,
+                    crateName: name,
+                    subcratesDirectory: subcratesDirectory,
+                    rootDirectory: rootDirectory,
+                    fileManager: fileManager
+                )
+                results.append(result)
+
+            case let .existing(crate):
+                let crateKey = existingCrateKey(crate)
+                guard processedExistingCrates.insert(crateKey).inserted else {
+                    continue
+                }
+
+                let result = try appendAudioFiles(
+                    audioFiles,
+                    toExistingCrate: crate,
+                    rootDirectory: rootDirectory,
+                    fileManager: fileManager
+                )
+                results.append(result)
+            }
+        }
+
+        return results
+    }
+
     private static func isSupportedAudioFile(_ url: URL) -> Bool {
         supportedAudioExtensions.contains(url.pathExtension.lowercased())
+    }
+
+    private static func existingCrateKey(_ crate: Crate) -> String {
+        if let fileURL = crate.fileURL {
+            return fileURL.standardizedFileURL.path
+        }
+        return Crate.fileBaseName(forPathComponents: crate.pathComponents)
     }
 
     private static func datedName(prefix: String, date: Date) -> String {
