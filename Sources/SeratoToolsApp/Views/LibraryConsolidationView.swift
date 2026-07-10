@@ -8,7 +8,7 @@ struct LibraryConsolidationView: View {
     let onLibraryChanged: () -> Void
 
     @State private var libraryPathDraft = ""
-    @State private var destinationPath = ""
+    @AppStorage(SeratoFeatureFlags.mainMusicFolderDefaultsKey) private var destinationPath = ""
     @State private var transferMode: LibraryConsolidationService.FileTransferMode = .move
     @State private var preview: LibraryConsolidationPreview?
     @State private var errorMessage: String?
@@ -58,7 +58,8 @@ struct LibraryConsolidationView: View {
     }
 
     private var defaultDestinationFolder: URL {
-        libraryService.libraryDirectory
+        FileManager.default.homeDirectoryForCurrentUser
+            .appendingPathComponent("Music", isDirectory: true)
     }
 
     private var currentDestinationURL: URL {

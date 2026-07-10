@@ -8,7 +8,6 @@ struct YouTubeRipView: View {
     private static let qualityDefaultsKey = "YouTubeRipSelectedQuality"
     private static let bitrateDefaultsKey = "YouTubeRipSelectedBitrate"
     private static let crateAssignmentDefaultsKey = "YouTubeRipCrateAssignment"
-    private static let destinationDefaultsKey = "YouTubeRipDestinationPath"
     private static let cratePrefixDefaultsKey = "YouTubeRipCratePrefix"
     private static let autoLookupDefaultsKey = "YouTubeRipAutoLookupAfterLoad"
 
@@ -92,7 +91,7 @@ struct YouTubeRipView: View {
     @State private var urlText = ""
     @State private var importedLinksFileName: String?
     @State private var importedLinksFileURL: URL?
-    @AppStorage(Self.destinationDefaultsKey) private var destinationPath = ""
+    @AppStorage(SeratoFeatureFlags.mainMusicFolderDefaultsKey) private var destinationPath = ""
     @AppStorage(Self.cratePrefixDefaultsKey) private var cratePrefix = "New Music"
     @AppStorage(Self.crateAssignmentDefaultsKey) private var crateAssignmentModeRaw = CrateAssignmentMode.dated.rawValue
     @State private var crateAssignmentMode: CrateAssignmentMode = .dated

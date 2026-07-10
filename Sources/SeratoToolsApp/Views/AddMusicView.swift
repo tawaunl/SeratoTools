@@ -30,7 +30,7 @@ struct AddMusicView: View {
     let onLibraryChanged: () -> Void
 
     @State private var selectedInputURLs: [URL] = []
-    @State private var destinationPath = ""
+    @AppStorage(SeratoFeatureFlags.mainMusicFolderDefaultsKey) private var destinationPath = ""
     @State private var cratePrefix = "New Music"
     @State private var crateAssignmentMode: CrateAssignmentMode = .dated
     @State private var selectedExistingCrateID: UUID?
