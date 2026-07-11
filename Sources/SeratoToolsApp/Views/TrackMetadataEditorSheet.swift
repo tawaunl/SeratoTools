@@ -1,4 +1,5 @@
 import SwiftUI
+import AppKit
 import SeratoToolsCore
 
 struct TrackMetadataEditorSheet: View {
@@ -49,6 +50,9 @@ struct TrackMetadataEditorSheet: View {
     @State private var saveErrorMessage: String?
     @State private var saveSuccessMessage: String?
     @State private var lockedFields: Set<MetadataField> = []
+    @State private var pendingArtwork: ID3Artwork?
+    @State private var isFetchingArtwork = false
+    @State private var artworkStatusMessage: String?
 
     init(track: Track, onSave: @escaping (SeratoTrackMetadataUpdate) throws -> Void) {
         self.track = track
@@ -188,6 +192,10 @@ struct TrackMetadataEditorSheet: View {
                                     if !candidate.comment.isEmpty {
                                         fieldButton("Comment") { apply(field: .comment, from: candidate) }
                                     }
+                                    if let artworkURL = candidate.artworkURL {
+                                        fieldButton(isFetchingArtwork ? "Art…" : "Art") { fetchArtwork(from: artworkURL) }
+                                            .disabled(isFetchingArtwork)
+                                    }
                                 }
                                 .padding(.vertical, 2)
                             }
@@ -271,6 +279,8 @@ struct TrackMetadataEditorSheet: View {
                 row("Comment", text: $comment)
             }
 
+            artworkRow
+
             HStack {
                 Spacer()
                 Button("Cancel") { dismiss() }
@@ -285,7 +295,8 @@ struct TrackMetadataEditorSheet: View {
                                 comment: comment,
                                 key: key,
                                 bpm: Double(bpmText.trimmingCharacters(in: .whitespacesAndNewlines)),
-                                year: Int(yearText.trimmingCharacters(in: .whitespacesAndNewlines))
+                                year: Int(yearText.trimmingCharacters(in: .whitespacesAndNewlines)),
+                                artwork: pendingArtwork
                             )
                         )
                         saveErrorMessage = nil
@@ -315,6 +326,88 @@ struct TrackMetadataEditorSheet: View {
                 .foregroundStyle(.secondary)
             TextField(label, text: text)
                 .textFieldStyle(.roundedBorder)
+        }
+    }
+
+    private var artworkRow: some View {
+        HStack(spacing: 10) {
+            Text("Cover Art")
+                .frame(width: 80, alignment: .trailing)
+                .foregroundStyle(.secondary)
+
+            if let pendingArtwork, let image = NSImage(data: pendingArtwork.imageData) {
+                Image(nsImage: image)
+                    .resizable()
+                    .interpolation(.medium)
+                    .frame(width: 44, height: 44)
+                    .clipShape(RoundedRectangle(cornerRadius: 6))
+                    .overlay(RoundedRectangle(cornerRadius: 6).stroke(Color.secondary.opacity(0.3), lineWidth: 1))
+            } else {
+                RoundedRectangle(cornerRadius: 6)
+                    .fill(Color.secondary.opacity(0.12))
+                    .frame(width: 44, height: 44)
+                    .overlay(Image(systemName: "music.note").foregroundStyle(.secondary))
+            }
+
+            VStack(alignment: .leading, spacing: 2) {
+                if isFetchingArtwork {
+                    Text("Downloading artwork…")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                } else if pendingArtwork != nil {
+                    Text("New artwork will be embedded on save.")
+                        .font(.caption)
+                        .foregroundStyle(.green)
+                } else {
+                    Text("Existing cover art is preserved. Use an online match's Art button to replace it.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+
+                if let artworkStatusMessage {
+                    Text(artworkStatusMessage)
+                        .font(.caption2)
+                        .foregroundStyle(.red)
+                }
+            }
+
+            Spacer(minLength: 0)
+
+            if pendingArtwork != nil {
+                Button("Remove") {
+                    pendingArtwork = nil
+                    artworkStatusMessage = nil
+                }
+                .controlSize(.small)
+            }
+        }
+    }
+
+    private func fetchArtwork(from url: URL) {
+        isFetchingArtwork = true
+        artworkStatusMessage = nil
+
+        Task {
+            do {
+                let (data, _) = try await URLSession.shared.data(from: url)
+                guard NSImage(data: data) != nil else {
+                    await MainActor.run {
+                        artworkStatusMessage = "Downloaded file was not a readable image."
+                        isFetchingArtwork = false
+                    }
+                    return
+                }
+                let mime = ID3ArtworkCodec.mimeType(forImageData: data)
+                await MainActor.run {
+                    pendingArtwork = ID3Artwork(mimeType: mime, imageData: data)
+                    isFetchingArtwork = false
+                }
+            } catch {
+                await MainActor.run {
+                    artworkStatusMessage = error.localizedDescription
+                    isFetchingArtwork = false
+                }
+            }
         }
     }
 

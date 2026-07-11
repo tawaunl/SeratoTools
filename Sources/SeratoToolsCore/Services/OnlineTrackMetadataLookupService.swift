@@ -27,6 +27,8 @@ public struct OnlineTrackMetadataCandidate: Identifiable, Sendable, Hashable {
     public let year: Int?
     public let bpm: Double?
     public let comment: String
+    /// URL to downloadable cover art for this candidate, when available.
+    public let artworkURL: URL?
 
     public init(
         id: UUID = UUID(),
@@ -37,7 +39,8 @@ public struct OnlineTrackMetadataCandidate: Identifiable, Sendable, Hashable {
         genre: String,
         year: Int?,
         bpm: Double?,
-        comment: String = ""
+        comment: String = "",
+        artworkURL: URL? = nil
     ) {
         self.id = id
         self.source = source
@@ -48,6 +51,7 @@ public struct OnlineTrackMetadataCandidate: Identifiable, Sendable, Hashable {
         self.year = year
         self.bpm = bpm
         self.comment = comment
+        self.artworkURL = artworkURL
     }
 }
 
@@ -276,9 +280,17 @@ public enum OnlineTrackMetadataLookupService {
                 album: item.collectionName ?? "",
                 genre: item.primaryGenreName ?? "",
                 year: yearFromDateString(item.releaseDate),
-                bpm: nil
+                bpm: nil,
+                artworkURL: upscaledITunesArtworkURL(item.artworkUrl100)
             )
         }
+    }
+
+    /// iTunes returns a 100x100 art URL; swap the size token for a larger one.
+    private static func upscaledITunesArtworkURL(_ raw: String?) -> URL? {
+        guard let raw, !raw.isEmpty else { return nil }
+        let upscaled = raw.replacingOccurrences(of: "100x100bb", with: "600x600bb")
+        return URL(string: upscaled) ?? URL(string: raw)
     }
 
     private static func fetchMusicBrainz(
@@ -438,6 +450,7 @@ private struct ITunesTrack: Decodable {
     let collectionName: String?
     let primaryGenreName: String?
     let releaseDate: String?
+    let artworkUrl100: String?
 }
 
 private struct MusicBrainzResponse: Decodable {

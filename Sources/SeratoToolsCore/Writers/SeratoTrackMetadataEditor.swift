@@ -144,16 +144,39 @@ public enum SeratoTrackMetadataEditor {
 
         var data = try Data(contentsOf: fileURL)
         let audioBody: Data
+        let originalTag: Data?
 
         if data.count >= 10, String(data: data.prefix(3), encoding: .ascii) == "ID3" {
             let size = decodeSyncSafeInt(Array(data[6...9]))
             let end = min(data.count, 10 + size)
+            originalTag = data.subdata(in: 0..<end)
             audioBody = data.subdata(in: end..<data.count)
         } else {
+            originalTag = nil
             audioBody = data
         }
 
-        let tagFrames = buildID3v24Frames(metadata: metadata)
+        var tagFrames = buildID3v24Frames(metadata: metadata)
+
+        // Cover art: apply new art when provided, otherwise preserve whatever
+        // was already embedded in the file.
+        if let newArtwork = metadata.artwork {
+            tagFrames.append(ID3ArtworkCodec.apicFrame(for: newArtwork))
+        } else if let originalTag, let existing = ID3ArtworkCodec.extractArtwork(fromID3TagBytes: originalTag) {
+            tagFrames.append(ID3ArtworkCodec.apicFrame(for: existing))
+        }
+
+        // Preserve any other frames (track number, lyrics, ReplayGain, etc.)
+        // we don't explicitly rewrite, so edits never silently drop tag data.
+        if let originalTag {
+            tagFrames.append(
+                ID3ArtworkCodec.preservedFrames(
+                    fromID3TagBytes: originalTag,
+                    excludingFrameIDs: overwrittenFrameIDs
+                )
+            )
+        }
+
         let header = buildID3v24Header(tagSize: tagFrames.count)
 
         data = Data()
@@ -163,6 +186,12 @@ public enum SeratoTrackMetadataEditor {
 
         try AtomicFileWriter.write(data, to: fileURL)
     }
+
+    /// Frame IDs this editor writes itself, so they aren't duplicated when
+    /// preserving the remaining frames from the original tag.
+    private static let overwrittenFrameIDs: Set<String> = [
+        "TIT2", "TPE1", "TALB", "TCON", "TKEY", "TBPM", "TYER", "TDRC", "TDAT", "COMM"
+    ]
 
     private static func buildID3v24Header(tagSize: Int) -> Data {
         var header = Data()
