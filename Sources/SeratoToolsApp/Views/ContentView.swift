@@ -4,6 +4,7 @@ import SeratoToolsCore
 
 enum SidebarSection: Hashable {
     case tracks
+    case duplicates
     case playlistMatch
     case addMusic
     case youtubeRip
@@ -300,9 +301,25 @@ struct ContentView: View {
         }
     }
 
+    private func tracksLoadStatus() -> (text: String, color: Color) {
+        if let loadErrorMessage = loadErrorMessage {
+            return ("Library load failed: \(loadErrorMessage)", .red)
+        }
+
+        if libraryService.tracks.isEmpty {
+            return ("No tracks loaded", .secondary)
+        }
+
+        return (
+            "Loaded \(libraryService.tracks.count) tracks, \(libraryService.crates.count) crates, \(libraryService.smartCrates.count) smart crates",
+            .secondary
+        )
+    }
+
     private var sidebar: some View {
         List(selection: $selectedSection) {
             Label("Tracks", systemImage: "music.note.list").tag(SidebarSection.tracks)
+            Label("Duplicates", systemImage: "rectangle.on.rectangle").tag(SidebarSection.duplicates)
             Label("PlaylistMatch", systemImage: "music.quarternote.3").tag(SidebarSection.playlistMatch)
             Label("Add Music", systemImage: "plus.square.on.square").tag(SidebarSection.addMusic)
             Label("YouTube Rip", systemImage: "arrow.down.circle").tag(SidebarSection.youtubeRip)
@@ -348,23 +365,11 @@ struct ContentView: View {
                 )
 
                 VStack(alignment: .leading, spacing: 8) {
-                    if let loadErrorMessage {
-                        Text("Library load failed: \(loadErrorMessage)")
-                            .font(.callout)
-                            .foregroundStyle(.red)
-                            .padding(.horizontal, 8)
-                            .padding(.top, 8)
-                    } else if libraryService.tracks.isEmpty {
-                        Text("No tracks loaded")
-                            .font(.callout)
-                            .foregroundStyle(.secondary)
-                            .padding(.horizontal, 8)
-                    } else {
-                        Text("Loaded \(libraryService.tracks.count) tracks, \(libraryService.crates.count) crates, \(libraryService.smartCrates.count) smart crates")
-                            .font(.callout)
-                            .foregroundStyle(.secondary)
-                            .padding(.horizontal, 8)
-                    }
+                    Text(tracksLoadStatus().text)
+                        .font(.callout)
+                        .foregroundStyle(tracksLoadStatus().color)
+                        .padding(.horizontal, 8)
+                        .padding(.top, 8)
 
                     VStack(alignment: .leading, spacing: 8) {
                         HStack(spacing: 10) {
@@ -464,6 +469,8 @@ struct ContentView: View {
                     )
                 }
             }
+        case .duplicates:
+            DuplicateTracksView(onLibraryChanged: reloadLibrary)
         case .playlistMatch:
             PlaylistMatchView(onLibraryChanged: reloadLibrary)
         case .addMusic:
