@@ -470,7 +470,7 @@ struct ContentView: View {
                 }
             }
         case .duplicates:
-            DuplicateTracksView()
+            DuplicateTracksView(onLibraryChanged: reloadLibrary)
         case .playlistMatch:
             PlaylistMatchView(onLibraryChanged: reloadLibrary)
         case .addMusic:

@@ -120,3 +120,67 @@ import Testing
     #expect(summary.redundantTrackCount == 2)
     #expect(summary.versionSeparatedGroupCount == 1)
 }
+
+@Test func duplicateGroupReportsFilenameDifferences() {
+    let differentNames: [Track] = [
+        Track(seratoStoredPath: "a", fileURL: URL(fileURLWithPath: "/tmp/Anthem.mp3"), title: "Anthem", artist: "Artist"),
+        Track(seratoStoredPath: "b", fileURL: URL(fileURLWithPath: "/tmp/Anthem-2.mp3"), title: "Anthem", artist: "Artist")
+    ]
+    let diffGroups = DuplicateTracksService.duplicateGroups(in: differentNames)
+    #expect(diffGroups.count == 1)
+    #expect(diffGroups[0].hasDifferentFilenames)
+    #expect(diffGroups[0].uniqueFilenameCount == 2)
+
+    let sameNames: [Track] = [
+        Track(seratoStoredPath: "x", fileURL: URL(fileURLWithPath: "/vol1/Track.mp3"), title: "Song", artist: "Band"),
+        Track(seratoStoredPath: "y", fileURL: URL(fileURLWithPath: "/vol2/track.MP3"), title: "Song", artist: "Band")
+    ]
+    let sameGroups = DuplicateTracksService.duplicateGroups(in: sameNames)
+    #expect(sameGroups.count == 1)
+    #expect(!sameGroups[0].hasDifferentFilenames)
+    #expect(sameGroups[0].uniqueFilenameCount == 1)
+}
+
+@Test func bestTrackPrefersMostCompleteTags() {
+    let full = Track(
+        seratoStoredPath: "full",
+        fileURL: URL(fileURLWithPath: "/tmp/full.mp3"),
+        title: "Song", artist: "Artist", album: "Album", genre: "House",
+        comment: "note", year: 2020, bpm: 124, key: "8A", trackNumber: 3,
+        dateAdded: Date(timeIntervalSince1970: 100 * 86400)
+    )
+    let sparse = Track(
+        seratoStoredPath: "sparse",
+        fileURL: URL(fileURLWithPath: "/tmp/sparse.mp3"),
+        title: "Song", artist: "Artist",
+        dateAdded: Date(timeIntervalSince1970: 1 * 86400)
+    )
+
+    #expect(DuplicateTracksService.completenessScore(for: full) > DuplicateTracksService.completenessScore(for: sparse))
+    #expect(DuplicateTracksService.bestTrack(in: [sparse, full])?.seratoStoredPath == "full")
+    #expect(DuplicateTracksService.redundantTracks(in: [sparse, full]).map(\.seratoStoredPath) == ["sparse"])
+}
+
+@Test func bestTrackBreaksTiesByOldestDateAdded() {
+    let newer = Track(
+        seratoStoredPath: "newer",
+        fileURL: URL(fileURLWithPath: "/tmp/newer.mp3"),
+        title: "Tune", artist: "X", album: "Y",
+        dateAdded: Date(timeIntervalSince1970: 50 * 86400)
+    )
+    let older = Track(
+        seratoStoredPath: "older",
+        fileURL: URL(fileURLWithPath: "/tmp/older.mp3"),
+        title: "Tune", artist: "X", album: "Y",
+        dateAdded: Date(timeIntervalSince1970: 10 * 86400)
+    )
+    let undated = Track(
+        seratoStoredPath: "undated",
+        fileURL: URL(fileURLWithPath: "/tmp/undated.mp3"),
+        title: "Tune", artist: "X", album: "Y",
+        dateAdded: nil
+    )
+
+    #expect(DuplicateTracksService.bestTrack(in: [newer, older])?.seratoStoredPath == "older")
+    #expect(DuplicateTracksService.bestTrack(in: [undated, newer])?.seratoStoredPath == "newer")
+}

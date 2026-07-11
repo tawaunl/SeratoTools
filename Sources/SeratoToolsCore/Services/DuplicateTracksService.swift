@@ -123,6 +123,68 @@ public enum DuplicateTracksService {
         versionCategory(for: titleSource(for: track)).displayName
     }
 
+    /// Counts how many meaningful ID3/metadata fields a track has populated.
+    /// Higher means more complete tag information.
+    public static func completenessScore(for track: Track) -> Int {
+        var score = 0
+
+        let textFields = [
+            track.title,
+            track.artist,
+            track.album,
+            track.genre,
+            track.comment,
+            track.grouping,
+            track.label
+        ]
+        for field in textFields where !field.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            score += 1
+        }
+
+        if track.year != nil { score += 1 }
+        if let bpm = track.bpm, bpm > 0 { score += 1 }
+        if let key = track.key, !key.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { score += 1 }
+        if track.trackNumber != nil { score += 1 }
+
+        return score
+    }
+
+    /// Orders a group's tracks best-first: most complete ID3 tags win, ties go
+    /// to the oldest `dateAdded`, and a final stable tie-break keeps ordering
+    /// deterministic. The first element is the recommended track to keep.
+    public static func rankedTracks(in tracks: [Track]) -> [Track] {
+        tracks.sorted(by: isBetterCandidate)
+    }
+
+    /// The recommended track to keep for a set of duplicates: most complete
+    /// tags, breaking ties toward the oldest `dateAdded`.
+    public static func bestTrack(in tracks: [Track]) -> Track? {
+        rankedTracks(in: tracks).first
+    }
+
+    /// The tracks that would be removed if the best track is kept.
+    public static func redundantTracks(in tracks: [Track]) -> [Track] {
+        Array(rankedTracks(in: tracks).dropFirst())
+    }
+
+    private static func isBetterCandidate(_ lhs: Track, _ rhs: Track) -> Bool {
+        let lhsScore = completenessScore(for: lhs)
+        let rhsScore = completenessScore(for: rhs)
+        if lhsScore != rhsScore {
+            return lhsScore > rhsScore
+        }
+
+        // Tie: prefer the oldest track by date added. A missing date is treated
+        // as the most recent so a track with a known date wins.
+        let lhsDate = lhs.dateAdded ?? .distantFuture
+        let rhsDate = rhs.dateAdded ?? .distantFuture
+        if lhsDate != rhsDate {
+            return lhsDate < rhsDate
+        }
+
+        return lhs.seratoStoredPath.localizedStandardCompare(rhs.seratoStoredPath) == .orderedAscending
+    }
+
     private struct Candidate {
         let track: Track
         let artistDisplay: String
