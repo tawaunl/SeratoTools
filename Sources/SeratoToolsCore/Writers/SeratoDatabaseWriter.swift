@@ -9,6 +9,10 @@ public struct SeratoTrackMetadataUpdate: Sendable {
     public var key: String
     public var bpm: Double?
     public var year: Int?
+    /// Optional new cover art to embed in the file's ID3 tag. When nil, any
+    /// existing embedded cover art is preserved. Ignored for the Serato
+    /// database (art lives only in the audio file's ID3 tag).
+    public var artwork: ID3Artwork?
 
     public init(
         title: String,
@@ -18,7 +22,8 @@ public struct SeratoTrackMetadataUpdate: Sendable {
         comment: String,
         key: String,
         bpm: Double?,
-        year: Int?
+        year: Int?,
+        artwork: ID3Artwork? = nil
     ) {
         self.title = title
         self.artist = artist
@@ -28,6 +33,7 @@ public struct SeratoTrackMetadataUpdate: Sendable {
         self.key = key
         self.bpm = bpm
         self.year = year
+        self.artwork = artwork
     }
 }
 
