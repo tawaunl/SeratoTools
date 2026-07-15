@@ -6,6 +6,10 @@
 	<string>SeratoTools</string>
 	<key>CFBundleExecutable</key>
 	<string>SeratoTools</string>
+	<key>CFBundleIconFile</key>
+	<string>AppIcon</string>
+	<key>CFBundleIconName</key>
+	<string>AppIcon</string>
 	<key>CFBundleIdentifier</key>
 	<string>com.seratotools.app</string>
 	<key>CFBundleInfoDictionaryVersion</key>

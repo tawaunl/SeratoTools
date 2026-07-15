@@ -385,6 +385,13 @@ cp "$ROOT_DIR/Packaging/Info.plist" "$APP_BUNDLE/Contents/Info.plist"
 cp "$CLI_BIN_PATH" "$RESOURCE_BIN_DIR/SeratoToolsCLI"
 chmod +x "$RESOURCE_BIN_DIR/SeratoToolsCLI"
 
+# App icon (referenced by CFBundleIconFile in Info.plist).
+if [[ -f "$ROOT_DIR/Packaging/AppIcon.icns" ]]; then
+	cp "$ROOT_DIR/Packaging/AppIcon.icns" "$APP_BUNDLE/Contents/Resources/AppIcon.icns"
+else
+	echo "Warning: Packaging/AppIcon.icns not found; app will build without a custom icon." >&2
+fi
+
 # Bundle scripts so Quick Actions can be installed from /Applications/SeratoTools.app.
 cp "$ROOT_DIR/Scripts/finder-add-music.sh" "$RESOURCE_SCRIPT_DIR/finder-add-music.sh"
 if [[ -f "$ROOT_DIR/Scripts/install-finder-quick-action-from-app.sh" ]]; then
