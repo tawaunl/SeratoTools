@@ -8,6 +8,13 @@ public final class LibraryService: ObservableObject {
     @Published public private(set) var smartCrates: [Crate] = []
     @Published public private(set) var reloadErrorMessage: String?
 
+    /// Sorted, deduplicated genres/artist count across `tracks`. Recomputed
+    /// once whenever `tracks` is reassigned rather than on every read, since
+    /// views were re-deriving these (with a Set + sort) on every body
+    /// evaluation while displaying the library.
+    @Published public private(set) var trackGenres: [String] = []
+    @Published public private(set) var totalArtistCount: Int = 0
+
     @Published public private(set) var libraryDirectory: URL
 
     public init(libraryDirectory: URL = SeratoLibraryLocator.defaultLibraryDirectory) {
@@ -27,6 +34,8 @@ public final class LibraryService: ObservableObject {
     }
 
     public func reload() throws {
+        defer { refreshDerivedTrackStats() }
+
         let rootDirectory = SeratoLibraryLocator.rootDirectory(for: libraryDirectory)
         do {
             tracks = try SeratoDatabaseParser.parseTracks(at: databaseFile, rootDirectory: rootDirectory)
@@ -43,6 +52,8 @@ public final class LibraryService: ObservableObject {
     }
 
     public func reloadTracksOnly() throws {
+        defer { refreshDerivedTrackStats() }
+
         let rootDirectory = SeratoLibraryLocator.rootDirectory(for: libraryDirectory)
         do {
             tracks = try SeratoDatabaseParser.parseTracks(at: databaseFile, rootDirectory: rootDirectory)
@@ -52,6 +63,11 @@ public final class LibraryService: ObservableObject {
             reloadErrorMessage = error.localizedDescription
             throw error
         }
+    }
+
+    private func refreshDerivedTrackStats() {
+        trackGenres = Array(Set(tracks.map(\.genre).filter { !$0.isEmpty })).sorted()
+        totalArtistCount = Set(tracks.map(\.artist).filter { !$0.isEmpty }).count
     }
 
     public func setLibraryDirectory(_ newDirectory: URL) {

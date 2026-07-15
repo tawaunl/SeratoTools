@@ -123,7 +123,7 @@ struct TrackTableView: View {
         .onChange(of: selectedTrackKeys) {
             notifySelectionChanged()
         }
-        .onChange(of: displayedTracks.map(selectionKey(for:))) {
+        .onChange(of: displayedTracks) {
             notifySelectionChanged()
         }
     }
@@ -334,11 +334,10 @@ private struct TrackNSTableView: NSViewRepresentable {
 
     func updateNSView(_ nsView: NSScrollView, context: Context) {
         context.coordinator.parent = self
-        guard let table = context.coordinator.tableView else { return }
+        guard context.coordinator.tableView != nil else { return }
 
         context.coordinator.applySortDescriptor(columnID: sortColumn, ascending: sortAscending)
-        table.reloadData()
-        context.coordinator.restoreSelectionIfNeeded()
+        context.coordinator.syncTracksAndSelectionIfNeeded()
     }
 
     private struct ColumnDescriptor {
@@ -369,6 +368,13 @@ private struct TrackNSTableView: NSViewRepresentable {
         weak var tableView: NSTableView?
         private var applyingSortDescriptor = false
         private let editableColumnIDs: Set<String> = ["title", "artist", "album", "genre", "year", "comment", "key", "bpm"]
+        // Last tracks/selection actually applied to the table, so
+        // `updateNSView` (called on every SwiftUI update pass of this
+        // representable, not just when data changes) can skip `reloadData()`
+        // and the O(n) `restoreSelectionIfNeeded()` scan when neither
+        // changed since the last sync.
+        private var lastAppliedTracks: [Track] = []
+        private var lastAppliedSelectionKeys: Set<String> = []
 
         init(parent: TrackNSTableView) {
             self.parent = parent
@@ -556,6 +562,24 @@ private struct TrackNSTableView: NSViewRepresentable {
             }
 
             parent.onMetadataEditRequested?(track, metadata)
+        }
+
+        /// Applies `parent.tracks`/`parent.selectedTrackKeys` to the table
+        /// only when they actually differ from what's already shown, so
+        /// SwiftUI update passes unrelated to this table (e.g. typing
+        /// elsewhere in the window) don't pay for a full `reloadData()`.
+        func syncTracksAndSelectionIfNeeded() {
+            guard let table = tableView else { return }
+
+            if lastAppliedTracks != parent.tracks {
+                lastAppliedTracks = parent.tracks
+                table.reloadData()
+                restoreSelectionIfNeeded()
+                lastAppliedSelectionKeys = parent.selectedTrackKeys
+            } else if lastAppliedSelectionKeys != parent.selectedTrackKeys {
+                lastAppliedSelectionKeys = parent.selectedTrackKeys
+                restoreSelectionIfNeeded()
+            }
         }
 
         func restoreSelectionIfNeeded() {

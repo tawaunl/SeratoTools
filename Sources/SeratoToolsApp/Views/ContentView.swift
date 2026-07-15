@@ -58,6 +58,7 @@ struct ContentView: View {
     @State private var metadataSaveMessageTask: Task<Void, Never>?
     @State private var activeAudioTrack: Track?
     @State private var audioActivationToken = 0
+    @State private var filteredLibraryTracks: [Track] = []
     @AppStorage(Self.confirmDeleteActionsDefaultsKey) private var confirmDeleteActions = true
 
     private var totalCratesCount: Int {
@@ -76,25 +77,16 @@ struct ContentView: View {
         Set((crateHierarchy.hiddenNodes + smartCrateHierarchy.hiddenNodes).map(\.id)).count
     }
 
-    private var trackGenres: [String] {
-        Array(Set(libraryService.tracks.map(\.genre).filter { !$0.isEmpty })).sorted()
-    }
-
-    private var filteredLibraryTracks: [Track] {
-        guard let selectedTrackGenreFilter else { return libraryService.tracks }
-        return libraryService.tracks.filter { $0.genre == selectedTrackGenreFilter }
-    }
-
     private var totalTrackCount: Int {
         libraryService.tracks.count
     }
 
-    private var totalArtistCount: Int {
-        Set(libraryService.tracks.map(\.artist).filter { !$0.isEmpty }).count
-    }
-
-    private var totalGenreCount: Int {
-        trackGenres.count
+    private func updateFilteredLibraryTracks() {
+        guard let selectedTrackGenreFilter else {
+            filteredLibraryTracks = libraryService.tracks
+            return
+        }
+        filteredLibraryTracks = libraryService.tracks.filter { $0.genre == selectedTrackGenreFilter }
     }
 
     var body: some View {
@@ -124,6 +116,12 @@ struct ContentView: View {
         }
         .onChange(of: selectedSection) {
             resetTransientFilters()
+        }
+        .onChange(of: libraryService.tracks) {
+            updateFilteredLibraryTracks()
+        }
+        .onChange(of: selectedTrackGenreFilter) {
+            updateFilteredLibraryTracks()
         }
         .onChange(of: selectedCrateNode?.id) {
             if selectedSection == .crates {
@@ -379,12 +377,12 @@ struct ContentView: View {
                             crateStatTag(title: "Tracks", value: totalTrackCount, isActive: selectedTrackGenreFilter == nil) {
                                 selectedTrackGenreFilter = nil
                             }
-                            crateStatTag(title: "Artists", value: totalArtistCount)
-                            crateStatTag(title: "Genres", value: totalGenreCount)
+                            crateStatTag(title: "Artists", value: libraryService.totalArtistCount)
+                            crateStatTag(title: "Genres", value: libraryService.trackGenres.count)
                             Spacer(minLength: 0)
                         }
 
-                        if !trackGenres.isEmpty {
+                        if !libraryService.trackGenres.isEmpty {
                             ScrollView(.horizontal, showsIndicators: false) {
                                 HStack(spacing: 6) {
                                     Button("All") {
@@ -401,7 +399,7 @@ struct ContentView: View {
                                     )
                                     .foregroundStyle(selectedTrackGenreFilter == nil ? .white : .primary)
 
-                                    ForEach(trackGenres, id: \.self) { genre in
+                                    ForEach(libraryService.trackGenres, id: \.self) { genre in
                                         Button(genre) {
                                             selectedTrackGenreFilter = selectedTrackGenreFilter == genre ? nil : genre
                                         }
@@ -560,6 +558,7 @@ struct ContentView: View {
             smartCrateHierarchy.rebuild(from: [])
             selectedCrateNode = nil
         }
+        updateFilteredLibraryTracks()
     }
 
     private func refreshedSelectedCrateNode(previousID: String?) -> CrateNode? {

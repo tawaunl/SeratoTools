@@ -18,6 +18,7 @@ struct LibraryConsolidationView: View {
     @State private var isRefreshingPreview = false
     @State private var previewRefreshTask: Task<Void, Never>?
     @State private var selectedSourceGroupIDs: Set<String> = []
+    @State private var activePreview: LibraryConsolidationPreview?
 
     var body: some View {
         ScrollView {
@@ -70,9 +71,18 @@ struct LibraryConsolidationView: View {
         return URL(fileURLWithPath: trimmed)
     }
 
-    private var activePreview: LibraryConsolidationPreview? {
-        guard let preview else { return nil }
-        return LibraryConsolidationService.filteredPreview(preview, includingSourceGroupIDs: selectedSourceGroupIDs)
+    /// Recomputed explicitly at the few places `preview`/`selectedSourceGroupIDs`
+    /// actually change, instead of being a computed property: `activePreview`
+    /// is read from ~6 places across this view's body, and re-filtering
+    /// `preview.moves`/`sourceGroups` (which can be large once a library is
+    /// scattered across many folders) on every one of those reads on every
+    /// render was the real cost — not the file-existence scan in `preview()`.
+    private func updateActivePreview() {
+        guard let preview else {
+            activePreview = nil
+            return
+        }
+        activePreview = LibraryConsolidationService.filteredPreview(preview, includingSourceGroupIDs: selectedSourceGroupIDs)
     }
 
     private enum SelectionState {
@@ -282,7 +292,7 @@ struct LibraryConsolidationView: View {
                     Spacer(minLength: 0)
                 }
 
-                VStack(spacing: 4) {
+                LazyVStack(spacing: 4) {
                     ForEach(preview.sourceGroups) { group in
                         VStack(alignment: .leading, spacing: 3) {
                             HStack(alignment: .top, spacing: 12) {
@@ -479,6 +489,7 @@ struct LibraryConsolidationView: View {
             guard !Task.isCancelled else { return }
             preview = computedPreview
             selectedSourceGroupIDs = synchronizedSelection(for: computedPreview)
+            updateActivePreview()
             isRefreshingPreview = false
         }
     }
@@ -501,6 +512,7 @@ struct LibraryConsolidationView: View {
         } else {
             selectedSourceGroupIDs.insert(sourceGroupID)
         }
+        updateActivePreview()
     }
 
     private var selectAllIconName: String {
@@ -517,6 +529,7 @@ struct LibraryConsolidationView: View {
     private func toggleSelectAllSources() {
         guard let preview else {
             selectedSourceGroupIDs = []
+            updateActivePreview()
             return
         }
 
@@ -527,6 +540,7 @@ struct LibraryConsolidationView: View {
         case .partial, .none:
             selectedSourceGroupIDs = allIDs
         }
+        updateActivePreview()
     }
 
     private func refreshDestinationCapacity() {
