@@ -152,7 +152,8 @@ SeratoTools is built to reduce risk during library mutation.
 
 ## Requirements
 
-- macOS 14+
+- macOS 13+
+- Apple Silicon or Intel (shipped app is universal2)
 - Swift 6
 - yt-dlp and ffmpeg for YouTube workflows
 - fpcalc for audio fingerprint lookup
@@ -179,17 +180,20 @@ Build installer package:
 ./Scripts/build-installer.sh
 ```
 
-Build universal2 package (Apple Silicon + Intel):
-
-```bash
-SERATOTOOLS_BUILD_UNIVERSAL=1 ./Scripts/build-installer.sh
-```
-
 Artifacts are written to dist/.
+
+Architecture:
+
+- The app and CLI binaries are **always built universal2 (arm64 + x86_64)**, so the shipped app installs and launches on both Apple Silicon and Intel Macs. (An arm64-only app makes Intel Macs report *"This application is not supported on this Mac."*)
+- `SERATOTOOLS_BUILD_UNIVERSAL=1` additionally requires the bundled runtime tools (fpcalc/ffmpeg/ffprobe) to be universal2, and validates this with a preflight. It needs universal Homebrew dependencies on the build host.
+
+  ```bash
+  SERATOTOOLS_BUILD_UNIVERSAL=1 ./Scripts/build-installer.sh
+  ```
 
 Installer note:
 
-- Runtime dependencies are bundled inside the app (fpcalc, yt-dlp, ffmpeg, ffprobe, plus required non-system dylibs), so target machines do not need Homebrew dependency provisioning.
+- Runtime dependencies are bundled inside the app (fpcalc, yt-dlp, ffmpeg, ffprobe, plus required non-system dylibs), so target machines do not need Homebrew dependency provisioning. Without `SERATOTOOLS_BUILD_UNIVERSAL=1`, the bundled tools are the build host's native architecture; on a different-arch Mac the installer's Homebrew bootstrap installs arch-correct copies at install time.
 
 ## Project Layout
 
