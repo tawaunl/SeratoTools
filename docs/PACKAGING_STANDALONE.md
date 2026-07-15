@@ -22,17 +22,27 @@ From repository root:
 ./Scripts/build-app.sh
 ```
 
-Build universal2 app bundle (Apple Silicon + Intel):
+The app and CLI binaries are **always built universal2 (arm64 + x86_64)**, so the
+shipped app runs on both Apple Silicon and Intel Macs. An arm64-only app makes
+Intel Macs report *"This application is not supported on this Mac."*
+
+Optionally require the **bundled runtime tools** (fpcalc/ffmpeg/ffprobe) to be
+universal2 as well:
 
 ```bash
 SERATOTOOLS_BUILD_UNIVERSAL=1 ./Scripts/build-app.sh
 ```
 
-Universal build note:
+Runtime tool notes:
 
-- The script validates that bundled runtime tools and libraries are universal2.
-- Universal mode now performs a fast preflight before compile to fail early when required runtime tools are single-arch.
-- If your build host only has single-arch Homebrew dependencies, universal mode fails with an actionable error.
+- Without the flag, bundled runtime tools are the build host's native arch. The
+  app still launches everywhere because the binaries are universal; on a
+  different-arch Mac the installer's Homebrew bootstrap installs arch-correct
+  `yt-dlp`/`ffmpeg`/`fpcalc` at install time (and the YouTube Rip screen's
+  **Install Dependencies** button can do the same on demand).
+- With `SERATOTOOLS_BUILD_UNIVERSAL=1`, a preflight validates that the bundled
+  runtime tools and their dylibs are universal2 and fails early if they are not.
+  This requires universal Homebrew dependencies on the build host.
 
 Output:
 
@@ -54,7 +64,8 @@ SERATOTOOLS_BUILD_UNIVERSAL=1 ./Scripts/build-installer.sh
 
 Universal installer note:
 
-- `build-installer.sh` delegates to `build-app.sh`, so the same universal dependency validation applies.
+- `build-installer.sh` delegates to `build-app.sh`, so the app/CLI are always
+  universal2 and the flag only additionally requires universal bundled runtime tools.
 
 Output:
 

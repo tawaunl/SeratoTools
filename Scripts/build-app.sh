@@ -107,38 +107,35 @@ resolve_path_from_command() {
 }
 
 build_product_binary() {
+	# The app and CLI binaries are ALWAYS built as universal2 (arm64 + x86_64)
+	# so the shipped app launches on both Apple Silicon and Intel Macs. An
+	# arm64-only app triggers macOS "This application is not supported on this
+	# Mac" on Intel. Cross-compiling the Swift binaries is cheap and does not
+	# require Intel Homebrew runtime tools (those are handled separately).
 	local product="$1"
 	local output_path="$2"
+	local arch
+	local build_path
+	local arch_bin_dir
+	local arch_bin_path
+	local arch_bins=()
 
-	if [[ "$BUILD_UNIVERSAL" == "1" ]]; then
-		local arch
-		local build_path
-		local arch_bin_dir
-		local arch_bin_path
-		local arch_bins=()
+	for arch in arm64 x86_64; do
+		build_path="$BUILD_ARTIFACT_DIR/.swift-build-$product-$arch"
+		rm -rf "$build_path"
+		swift build -c release --product "$product" --arch "$arch" --build-path "$build_path"
+		arch_bin_dir="$(swift build -c release --product "$product" --arch "$arch" --build-path "$build_path" --show-bin-path)"
+		arch_bin_path="$arch_bin_dir/$product"
+		if [[ ! -x "$arch_bin_path" ]]; then
+			echo "Error: expected built binary not found at $arch_bin_path" >&2
+			exit 1
+		fi
+		arch_bins+=("$arch_bin_path")
+	done
 
-		for arch in arm64 x86_64; do
-			build_path="$BUILD_ARTIFACT_DIR/.swift-build-$product-$arch"
-			rm -rf "$build_path"
-			swift build -c release --product "$product" --arch "$arch" --build-path "$build_path"
-			arch_bin_dir="$(swift build -c release --product "$product" --arch "$arch" --build-path "$build_path" --show-bin-path)"
-			arch_bin_path="$arch_bin_dir/$product"
-			if [[ ! -x "$arch_bin_path" ]]; then
-				echo "Error: expected built binary not found at $arch_bin_path" >&2
-				exit 1
-			fi
-			arch_bins+=("$arch_bin_path")
-		done
-
-		lipo -create "${arch_bins[@]}" -output "$output_path"
-		chmod +x "$output_path"
-	else
-		swift build -c release --product "$product"
-		local bin_dir
-		bin_dir="$(swift build -c release --product "$product" --show-bin-path)"
-		cp "$bin_dir/$product" "$output_path"
-		chmod +x "$output_path"
-	fi
+	lipo -create "${arch_bins[@]}" -output "$output_path"
+	chmod +x "$output_path"
+	verify_universal_macho "$output_path" "$product app binary"
 }
 
 verify_universal_macho() {
@@ -365,10 +362,11 @@ if [[ "$BUILD_UNIVERSAL" == "1" ]]; then
 	run_universal_preflight
 fi
 
+echo "Building universal2 app and CLI binaries (arm64 + x86_64)..."
 if [[ "$BUILD_UNIVERSAL" == "1" ]]; then
-	echo "Building universal2 app and CLI binaries (arm64 + x86_64)..."
+	echo "Universal runtime tools requested: bundled yt-dlp/ffmpeg/fpcalc must be universal2."
 else
-	echo "Building native-architecture app and CLI binaries..."
+	echo "Bundling native-architecture runtime tools (yt-dlp/ffmpeg/fpcalc); the installer bootstraps arch-correct copies on the target machine."
 fi
 
 rm -rf "$BUILD_ARTIFACT_DIR"
@@ -435,8 +433,9 @@ codesign --force --deep --sign - "$APP_BUNDLE"
 
 echo "Built $APP_BUNDLE"
 echo "Bundled portable runtime tools: fpcalc, yt-dlp, ffmpeg, ffprobe"
+echo "App + CLI binaries: universal2 (arm64 + x86_64) — runs on Apple Silicon and Intel."
 if [[ "$BUILD_UNIVERSAL" == "1" ]]; then
-	echo "Universal mode: enabled (validated universal2 artifacts)"
+	echo "Bundled runtime tools: universal2 (validated)."
 else
-	echo "Universal mode: disabled (set SERATOTOOLS_BUILD_UNIVERSAL=1 to build universal2)"
+	echo "Bundled runtime tools: native arch only (set SERATOTOOLS_BUILD_UNIVERSAL=1 to require universal tools; otherwise the installer bootstraps arch-correct copies on the target Mac)."
 fi
