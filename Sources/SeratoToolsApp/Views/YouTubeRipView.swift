@@ -1321,6 +1321,7 @@ struct YouTubeRipView: View {
     private func runID3Lookup() {
         isSearchingLookup = true
         lookupErrorMessage = nil
+        lookupResults = []
 
         let query = OnlineTrackMetadataLookupService.Query(
             title: id3Title,
@@ -1331,19 +1332,25 @@ struct YouTubeRipView: View {
 
         Task {
             do {
-                let results = try await OnlineTrackMetadataLookupService.lookup(
+                let stream = OnlineTrackMetadataLookupService.lookupStream(
                     query: query,
                     sourceSelection: sourceSelection
                 )
 
+                for try await results in stream {
+                    await MainActor.run {
+                        lookupResults = results
+                    }
+                }
+
                 await MainActor.run {
-                    lookupResults = results
-                    if results.isEmpty {
+                    if lookupResults.isEmpty {
                         lookupErrorMessage = "No metadata matches found."
                     }
                 }
             } catch {
                 await MainActor.run {
+                    lookupResults = []
                     lookupErrorMessage = error.localizedDescription
                 }
             }

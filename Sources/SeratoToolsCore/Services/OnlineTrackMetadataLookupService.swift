@@ -55,9 +55,51 @@ public struct OnlineTrackMetadataCandidate: Identifiable, Sendable, Hashable {
     }
 }
 
+/// Caches recent lookup results in memory so re-running the same search
+/// (e.g. after a small edit to the search terms) doesn't re-hit the network.
+private actor OnlineMetadataLookupCache {
+    static let shared = OnlineMetadataLookupCache()
+
+    private struct Entry {
+        let timestamp: Date
+        let results: [OnlineTrackMetadataCandidate]
+    }
+
+    private var storage: [String: Entry] = [:]
+    private let ttl: TimeInterval = 300
+    private let maxEntries = 200
+
+    func get(_ key: String) -> [OnlineTrackMetadataCandidate]? {
+        guard let entry = storage[key] else { return nil }
+        guard Date().timeIntervalSince(entry.timestamp) <= ttl else {
+            storage.removeValue(forKey: key)
+            return nil
+        }
+        return entry.results
+    }
+
+    func set(_ key: String, results: [OnlineTrackMetadataCandidate]) {
+        if storage.count >= maxEntries {
+            storage.removeAll()
+        }
+        storage[key] = Entry(timestamp: Date(), results: results)
+    }
+}
+
 public enum OnlineTrackMetadataLookupService {
     public static let discogsTokenEnvironmentKey = "SERATOTOOLS_DISCOGS_TOKEN"
     public static let discogsTokenDefaultsKey = "SeratoToolsDiscogsToken"
+
+    /// A session with a much shorter timeout than `.shared`'s 60s default, so a
+    /// stalled source (MusicBrainz in particular) fails fast instead of stalling
+    /// the whole search.
+    public static let defaultSession: URLSession = {
+        let configuration = URLSessionConfiguration.default
+        configuration.timeoutIntervalForRequest = 10
+        configuration.timeoutIntervalForResource = 15
+        configuration.waitsForConnectivity = false
+        return URLSession(configuration: configuration)
+    }()
 
     public enum SourceSelection: String, CaseIterable, Sendable {
         case all
@@ -125,13 +167,19 @@ public enum OnlineTrackMetadataLookupService {
         query: Query,
         sourceSelection: SourceSelection = .all,
         maxResultsPerSource: Int = 8,
-        session: URLSession = .shared
+        session: URLSession = defaultSession
     ) async throws -> [OnlineTrackMetadataCandidate] {
         let normalized = normalize(query: query)
         guard !normalized.title.isEmpty || !normalized.artist.isEmpty || !normalized.album.isEmpty else {
             throw LookupError.missingSearchTerms
         }
 
+        let cacheKey = cacheKey(for: normalized, sourceSelection: sourceSelection)
+        if let cached = await OnlineMetadataLookupCache.shared.get(cacheKey) {
+            return cached
+        }
+
+        let result: [OnlineTrackMetadataCandidate]
         if sourceSelection == .all {
             let token = discogsToken()
             let combined = await withTaskGroup(of: [OnlineTrackMetadataCandidate].self) { group in
@@ -159,19 +207,110 @@ public enum OnlineTrackMetadataLookupService {
                 return all
             }
 
-            return deduplicated(candidates: combined)
+            result = deduplicated(candidates: combined)
+        } else {
+            let results = try await fetchCandidates(
+                from: sourceSelection.enabledSources[0],
+                query: normalized,
+                maxResults: maxResultsPerSource,
+                session: session,
+                discogsToken: discogsToken(),
+                sourceSelection: sourceSelection
+            )
+
+            result = deduplicated(candidates: results)
         }
 
-        let results = try await fetchCandidates(
-            from: sourceSelection.enabledSources[0],
-            query: normalized,
-            maxResults: maxResultsPerSource,
-            session: session,
-            discogsToken: discogsToken(),
-            sourceSelection: sourceSelection
-        )
+        await OnlineMetadataLookupCache.shared.set(cacheKey, results: result)
+        return result
+    }
 
-        return deduplicated(candidates: results)
+    /// Same lookup as `lookup(query:sourceSelection:maxResultsPerSource:session:)`,
+    /// but yields the deduplicated results-so-far as each source responds instead
+    /// of waiting for every source in the selection to finish. For `.all`, this
+    /// means iTunes results (typically the fastest source) usually appear well
+    /// before MusicBrainz/Discogs land.
+    public static func lookupStream(
+        query: Query,
+        sourceSelection: SourceSelection = .all,
+        maxResultsPerSource: Int = 8,
+        session: URLSession = defaultSession
+    ) -> AsyncThrowingStream<[OnlineTrackMetadataCandidate], Error> {
+        AsyncThrowingStream { continuation in
+            let task = Task {
+                let normalized = normalize(query: query)
+                guard !normalized.title.isEmpty || !normalized.artist.isEmpty || !normalized.album.isEmpty else {
+                    continuation.finish(throwing: LookupError.missingSearchTerms)
+                    return
+                }
+
+                let cacheKey = cacheKey(for: normalized, sourceSelection: sourceSelection)
+                if let cached = await OnlineMetadataLookupCache.shared.get(cacheKey) {
+                    continuation.yield(cached)
+                    continuation.finish()
+                    return
+                }
+
+                guard sourceSelection == .all else {
+                    do {
+                        let results = try await fetchCandidates(
+                            from: sourceSelection.enabledSources[0],
+                            query: normalized,
+                            maxResults: maxResultsPerSource,
+                            session: session,
+                            discogsToken: discogsToken(),
+                            sourceSelection: sourceSelection
+                        )
+                        let deduped = deduplicated(candidates: results)
+                        await OnlineMetadataLookupCache.shared.set(cacheKey, results: deduped)
+                        continuation.yield(deduped)
+                        continuation.finish()
+                    } catch {
+                        continuation.finish(throwing: error)
+                    }
+                    return
+                }
+
+                let token = discogsToken()
+                var accumulated: [OnlineTrackMetadataCandidate] = []
+                await withTaskGroup(of: [OnlineTrackMetadataCandidate].self) { group in
+                    for source in sourceSelection.enabledSources {
+                        group.addTask {
+                            (try? await fetchCandidates(
+                                from: source,
+                                query: normalized,
+                                maxResults: maxResultsPerSource,
+                                session: session,
+                                discogsToken: token,
+                                sourceSelection: sourceSelection
+                            )) ?? []
+                        }
+                    }
+
+                    for await sourceResults in group {
+                        guard !sourceResults.isEmpty else { continue }
+                        accumulated.append(contentsOf: sourceResults)
+                        continuation.yield(deduplicated(candidates: accumulated))
+                    }
+                }
+
+                await OnlineMetadataLookupCache.shared.set(cacheKey, results: deduplicated(candidates: accumulated))
+                continuation.finish()
+            }
+
+            continuation.onTermination = { _ in
+                task.cancel()
+            }
+        }
+    }
+
+    private static func cacheKey(for query: Query, sourceSelection: SourceSelection) -> String {
+        [
+            sourceSelection.rawValue,
+            query.title.lowercased(),
+            query.artist.lowercased(),
+            query.album.lowercased()
+        ].joined(separator: "||")
     }
 
     private static func fetchCandidates(

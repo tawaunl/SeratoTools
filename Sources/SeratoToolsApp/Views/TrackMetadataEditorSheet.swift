@@ -450,17 +450,23 @@ struct TrackMetadataEditorSheet: View {
         lookupErrorMessage = nil
         saveErrorMessage = nil
         isSearchingOnline = true
+        lookupResults = []
 
         Task {
             do {
-                let results = try await OnlineTrackMetadataLookupService.lookup(
+                let stream = OnlineTrackMetadataLookupService.lookupStream(
                     query: .init(title: title, artist: artist, album: album),
                     sourceSelection: sourceSelection
                 )
 
+                for try await results in stream {
+                    await MainActor.run {
+                        lookupResults = results
+                    }
+                }
+
                 await MainActor.run {
-                    lookupResults = results
-                    if results.isEmpty {
+                    if lookupResults.isEmpty {
                         lookupErrorMessage = "No matches found from the selected source(s)."
                     }
                     isSearchingOnline = false

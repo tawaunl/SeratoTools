@@ -709,31 +709,23 @@ struct ContentView: View {
     private func saveTrackMetadataEditsBatch(_ updates: [(Track, SeratoTrackMetadataUpdate)]) throws {
         guard !updates.isEmpty else { return }
 
-        var successCount = 0
-        var failedNames: [String] = []
-
-        for (track, metadata) in updates {
-            do {
-                try SeratoTrackMetadataEditor.update(
-                    track: track,
-                    metadata: metadata,
-                    databaseFileURL: libraryService.databaseFile,
-                    // Bulk edits fill metadata across many tracks and must not
-                    // rename files: renaming here rewrites file paths mid-batch,
-                    // which caused "couldn't find this track in database V2"
-                    // and file-move failures. Renaming stays a single-track action.
-                    rewriteFilenameFromMetadata: false
-                )
-                successCount += 1
-            } catch {
-                failedNames.append(track.fileURL.lastPathComponent)
-            }
-        }
+        // Bulk edits fill metadata across many tracks and must not rename
+        // files: renaming here rewrites file paths mid-batch, which caused
+        // "couldn't find this track in database V2" and file-move failures.
+        // Renaming stays a single-track action, so `updateBatch` doesn't
+        // support it at all.
+        let result = try SeratoTrackMetadataEditor.updateBatch(
+            updates: updates.map { (track: $0.0, metadata: $0.1) },
+            databaseFileURL: libraryService.databaseFile
+        )
 
         try libraryService.reloadTracksOnly()
 
-        guard failedNames.isEmpty else {
-            throw BulkMetadataUpdateError(successCount: successCount, failedNames: failedNames)
+        guard result.failures.isEmpty else {
+            throw BulkMetadataUpdateError(
+                successCount: result.updatedTracks.count,
+                failedNames: result.failures.map { $0.track.fileURL.lastPathComponent }
+            )
         }
 
         showMetadataSaveSuccess()

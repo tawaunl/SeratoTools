@@ -160,7 +160,23 @@ public enum SeratoDatabaseWriter {
         metadata: SeratoTrackMetadataUpdate,
         in fileData: Data
     ) -> (data: Data, didRewrite: Bool) {
-        var didRewrite = false
+        let result = rewritingMetadata(byStoredPath: [storedPath: metadata], in: fileData)
+        return (result.data, result.rewrittenCount > 0)
+    }
+
+    /// Rewrites selected metadata fields for every `otrk` whose `pfil` is a
+    /// key in `metadataByStoredPath`, in a single pass over the database.
+    /// Used for bulk edits so updating N tracks costs one scan of the
+    /// database rather than N scans.
+    public static func rewritingMetadata(
+        byStoredPath metadataByStoredPath: [String: SeratoTrackMetadataUpdate],
+        in fileData: Data
+    ) -> (data: Data, rewrittenCount: Int) {
+        guard !metadataByStoredPath.isEmpty else {
+            return (fileData, 0)
+        }
+
+        var rewrittenCount = 0
         let topLevel = SeratoChunkCodec.readChunks(from: fileData)
 
         let newChunks: [SeratoChunk] = topLevel.map { chunk in
@@ -168,12 +184,12 @@ public enum SeratoDatabaseWriter {
             var fields = SeratoChunkCodec.readChunks(from: chunk.payload)
             guard
                 let pfilField = fields.first(where: { $0.tag == "pfil" }),
-                SeratoChunkCodec.decodeUTF16BEString(pfilField.payload) == storedPath
+                let metadata = metadataByStoredPath[SeratoChunkCodec.decodeUTF16BEString(pfilField.payload)]
             else {
                 return chunk
             }
 
-            didRewrite = true
+            rewrittenCount += 1
             upsertStringField("tsng", value: metadata.title, in: &fields)
             upsertStringField("tart", value: metadata.artist, in: &fields)
             upsertStringField("talb", value: metadata.album, in: &fields)
@@ -186,7 +202,7 @@ public enum SeratoDatabaseWriter {
             return SeratoChunk(tag: "otrk", payload: SeratoChunkCodec.writeChunks(fields))
         }
 
-        return (SeratoChunkCodec.writeChunks(newChunks), didRewrite)
+        return (SeratoChunkCodec.writeChunks(newChunks), rewrittenCount)
     }
 
     private static func upsertStringField(_ tag: String, value: String, in fields: inout [SeratoChunk]) {

@@ -132,6 +132,123 @@ public enum SeratoTrackMetadataEditor {
         }
     }
 
+    public struct BatchUpdateFailure {
+        public let track: Track
+        public let error: Error
+    }
+
+    public struct BatchUpdateResult {
+        public let updatedTracks: [Track]
+        public let failures: [BatchUpdateFailure]
+    }
+
+    /// Applies metadata edits for many tracks with a single read/backup/
+    /// rewrite/write/verify pass over `database V2`, instead of repeating
+    /// that whole-file work once per track (see `update(track:metadata:...)`).
+    /// A failure on one track (ID3 write, missing DB record, verification)
+    /// doesn't block the rest of the batch. Filename renaming isn't
+    /// supported here: renaming mid-batch would shift stored paths out from
+    /// under later lookups, so batch callers must keep it disabled.
+    public static func updateBatch(
+        updates: [(track: Track, metadata: SeratoTrackMetadataUpdate)],
+        databaseFileURL: URL
+    ) throws -> BatchUpdateResult {
+        guard !updates.isEmpty else {
+            return BatchUpdateResult(updatedTracks: [], failures: [])
+        }
+
+        var failures: [BatchUpdateFailure] = []
+        var id3WrittenUpdates: [(track: Track, metadata: SeratoTrackMetadataUpdate)] = []
+
+        // Update on-disk ID3 first so we never commit DB-only edits when a
+        // file-tag write fails, same as the single-track path.
+        for (track, metadata) in updates {
+            do {
+                try writeID3Tags(fileURL: track.fileURL, metadata: metadata)
+                id3WrittenUpdates.append((track, metadata))
+            } catch {
+                failures.append(BatchUpdateFailure(track: track, error: error))
+            }
+        }
+
+        guard !id3WrittenUpdates.isEmpty else {
+            return BatchUpdateResult(updatedTracks: [], failures: failures)
+        }
+
+        if FileManager.default.fileExists(atPath: databaseFileURL.path) {
+            try SeratoBackupBeforeWrite.snapshot(of: databaseFileURL)
+        }
+
+        let libraryDirectory = databaseFileURL.deletingLastPathComponent()
+        let rootDirectory = SeratoLibraryLocator.rootDirectory(for: libraryDirectory)
+        let original = try Data(contentsOf: databaseFileURL)
+
+        struct Resolved {
+            let track: Track
+            let metadata: SeratoTrackMetadataUpdate
+            let storedPath: String
+        }
+
+        // Build the stored-path index once for the whole batch: each of
+        // `storedPathCandidates`/`firstMatchingStoredPath` scans every
+        // `otrk` chunk in the database, so calling them per track (as the
+        // single-track path does) would turn this into N full-database
+        // scans again, right where the metadata rewrite above avoided that.
+        let storedPathIndex = buildStoredPathIndex(rootDirectory: rootDirectory, databaseData: original)
+
+        var resolved: [Resolved] = []
+        for (track, metadata) in id3WrittenUpdates {
+            guard let matched = resolveStoredPath(for: track, rootDirectory: rootDirectory, index: storedPathIndex) else {
+                failures.append(BatchUpdateFailure(track: track, error: EditError.trackNotFoundInDatabase(track.seratoStoredPath)))
+                continue
+            }
+            resolved.append(Resolved(track: track, metadata: metadata, storedPath: matched))
+        }
+
+        guard !resolved.isEmpty else {
+            return BatchUpdateResult(updatedTracks: [], failures: failures)
+        }
+
+        let metadataByStoredPath = Dictionary(
+            resolved.map { ($0.storedPath, $0.metadata) },
+            uniquingKeysWith: { _, latest in latest }
+        )
+        let rewritten = SeratoDatabaseWriter.rewritingMetadata(byStoredPath: metadataByStoredPath, in: original)
+
+        guard rewritten.rewrittenCount > 0 else {
+            for item in resolved {
+                failures.append(BatchUpdateFailure(track: item.track, error: EditError.trackNotFoundInDatabase(item.storedPath)))
+            }
+            return BatchUpdateResult(updatedTracks: [], failures: failures)
+        }
+
+        try AtomicFileWriter.write(rewritten.data, to: databaseFileURL)
+
+        // One verification parse for the whole batch, indexed by canonical
+        // path so each track's check is O(1) instead of re-scanning every
+        // persisted track.
+        let persistedTracks = SeratoDatabaseParser.parseTracks(from: rewritten.data, rootDirectory: rootDirectory)
+        var persistedByCanonicalPath: [String: Track] = [:]
+        persistedByCanonicalPath.reserveCapacity(persistedTracks.count)
+        for persisted in persistedTracks {
+            persistedByCanonicalPath[canonicalPath(for: persisted.fileURL)] = persisted
+        }
+
+        var updatedTracks: [Track] = []
+        for item in resolved {
+            guard
+                let persisted = canonicalPathSet(for: item.track.fileURL).lazy.compactMap({ persistedByCanonicalPath[$0] }).first,
+                metadataMatches(item.metadata, persistedTrack: persisted)
+            else {
+                failures.append(BatchUpdateFailure(track: item.track, error: EditError.metadataVerificationFailed(item.storedPath)))
+                continue
+            }
+            updatedTracks.append(item.track)
+        }
+
+        return BatchUpdateResult(updatedTracks: updatedTracks, failures: failures)
+    }
+
     public static func writeID3Tags(fileURL: URL, metadata: SeratoTrackMetadataUpdate) throws {
         try writeID3IfSupported(fileURL: fileURL, metadata: metadata)
     }
@@ -288,6 +405,52 @@ public enum SeratoTrackMetadataEditor {
         return candidates
     }
 
+    /// Precomputed view of every `otrk` record's stored path, built with one
+    /// scan over the database. Lets `resolveStoredPath` answer per-track
+    /// path-resolution questions in O(1) instead of each track re-scanning
+    /// every chunk the way `storedPathCandidates`/`firstMatchingStoredPath` do.
+    private struct StoredPathIndex {
+        let existingStoredPaths: Set<String>
+        let canonicalPathToStoredPath: [String: String]
+    }
+
+    private static func buildStoredPathIndex(rootDirectory: URL, databaseData: Data) -> StoredPathIndex {
+        var existingStoredPaths: Set<String> = []
+        var canonicalPathToStoredPath: [String: String] = [:]
+
+        for chunk in SeratoChunkCodec.readChunks(from: databaseData) where chunk.tag == "otrk" {
+            let fields = SeratoChunkCodec.readChunks(from: chunk.payload)
+            guard let pfil = fields.first(where: { $0.tag == "pfil" }) else { continue }
+            let storedPath = SeratoChunkCodec.decodeUTF16BEString(pfil.payload)
+            existingStoredPaths.insert(storedPath)
+
+            let resolved = SeratoLibraryLocator.resolve(seratoStoredPath: storedPath, rootDirectory: rootDirectory)
+            canonicalPathToStoredPath[canonicalPath(for: resolved)] = storedPath
+        }
+
+        return StoredPathIndex(existingStoredPaths: existingStoredPaths, canonicalPathToStoredPath: canonicalPathToStoredPath)
+    }
+
+    /// Same candidate-then-match logic as
+    /// `storedPathCandidates`/`firstMatchingStoredPath`, but against a
+    /// prebuilt `StoredPathIndex` instead of re-scanning the database.
+    private static func resolveStoredPath(for track: Track, rootDirectory: URL, index: StoredPathIndex) -> String? {
+        var candidates: [String] = [track.seratoStoredPath]
+
+        let derived = SeratoLibraryLocator.seratoStoredPath(for: track.fileURL, rootDirectory: rootDirectory)
+        if !derived.isEmpty, !candidates.contains(derived) {
+            candidates.append(derived)
+        }
+
+        for canonical in canonicalPathSet(for: track.fileURL) {
+            if let matched = index.canonicalPathToStoredPath[canonical], !candidates.contains(matched) {
+                candidates.append(matched)
+            }
+        }
+
+        return candidates.first(where: { index.existingStoredPaths.contains($0) })
+    }
+
     private static func verifyPersistedMetadata(
         _ metadata: SeratoTrackMetadataUpdate,
         in databaseData: Data,
@@ -301,7 +464,11 @@ public enum SeratoTrackMetadataEditor {
             return false
         }
 
-        return normalizedEquals(expected: metadata.title, actual: persistedTrack.title)
+        return metadataMatches(metadata, persistedTrack: persistedTrack)
+    }
+
+    private static func metadataMatches(_ metadata: SeratoTrackMetadataUpdate, persistedTrack: Track) -> Bool {
+        normalizedEquals(expected: metadata.title, actual: persistedTrack.title)
             && normalizedEquals(expected: metadata.artist, actual: persistedTrack.artist)
             && normalizedEquals(expected: metadata.album, actual: persistedTrack.album)
             && normalizedEquals(expected: metadata.genre, actual: persistedTrack.genre)
