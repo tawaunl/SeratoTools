@@ -47,6 +47,7 @@ struct TagsBulkEditView: View {
 
     let onApplyMetadata: (Track, SeratoTrackMetadataUpdate) throws -> Void
     let onApplyMetadataBatch: (([(Track, SeratoTrackMetadataUpdate)]) throws -> Void)?
+    let onTrackActivated: ((Track, [Track]) -> Void)?
 
     @State private var selectedScopeID: String = Self.allTracksID
     @State private var selectedTracks: [Track] = []
@@ -188,6 +189,9 @@ struct TagsBulkEditView: View {
                         },
                         onSelectionChanged: { selected in
                             selectedTracks = selected
+                        },
+                        onTrackActivated: { track, list in
+                            onTrackActivated?(track, list)
                         }
                     )
                 }

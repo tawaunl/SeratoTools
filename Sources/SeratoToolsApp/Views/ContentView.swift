@@ -493,6 +493,9 @@ struct ContentView: View {
                 },
                 onApplyMetadataBatch: { updates in
                     try saveTrackMetadataEditsBatch(updates)
+                },
+                onTrackActivated: { track, list in
+                    activateAudioTrack(track, in: list)
                 }
             )
         case .missingTracks:
