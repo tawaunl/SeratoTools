@@ -52,6 +52,7 @@ struct TagsBulkEditView: View {
     @State private var selectedTracks: [Track] = []
     @State private var metadataLookupTrack: Track?
     @State private var searchText = ""
+    @State private var selectedGenreFilter: String?
     @State private var bulkArtist = ""
     @State private var bulkAlbum = ""
     @State private var bulkGenre = ""
@@ -98,7 +99,7 @@ struct TagsBulkEditView: View {
         return selectedNode?.pathComponents.joined(separator: " / ") ?? "All Tracks"
     }
 
-    private var displayedTracks: [Track] {
+    private var scopeTracks: [Track] {
         guard let selectedNode else {
             return filteredTracks(from: libraryService.tracks)
         }
@@ -107,6 +108,18 @@ struct TagsBulkEditView: View {
         let selectedPaths = effectiveTrackPaths(for: selectedNode)
         let tracks = selectedPaths.compactMap { resolver.resolve(path: $0) }
         return filteredTracks(from: tracks)
+    }
+
+    private var scopeGenres: [String] {
+        let genres = scopeTracks
+            .map { $0.genre.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
+        return Array(Set(genres)).sorted()
+    }
+
+    private var displayedTracks: [Track] {
+        guard let selectedGenreFilter else { return scopeTracks }
+        return scopeTracks.filter { $0.genre == selectedGenreFilter }
     }
 
     private var filteredTree: [CrateNode] {
@@ -159,6 +172,7 @@ struct TagsBulkEditView: View {
 
                 VStack(alignment: .leading, spacing: 10) {
                     statsHeader
+                    genreFilterBar
                     bulkEditor
                     selectionStatusBar
 
@@ -183,6 +197,14 @@ struct TagsBulkEditView: View {
         .onAppear {
             if selectedScopeID != Self.allTracksID, allNodesByID[selectedScopeID] == nil {
                 selectedScopeID = Self.allTracksID
+            }
+        }
+        .onChange(of: selectedScopeID) {
+            selectedGenreFilter = nil
+        }
+        .onChange(of: searchText) {
+            if let selectedGenreFilter, !scopeGenres.contains(selectedGenreFilter) {
+                self.selectedGenreFilter = nil
             }
         }
         .alert(
@@ -287,6 +309,42 @@ struct TagsBulkEditView: View {
         .padding(.horizontal, 10)
         .padding(.top, 10)
         .glowCardStyle(radius: 8, opacity: 0.05)
+    }
+
+    @ViewBuilder
+    private var genreFilterBar: some View {
+        if !scopeGenres.isEmpty {
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 6) {
+                    genreFilterButton(title: "All", isActive: selectedGenreFilter == nil) {
+                        selectedGenreFilter = nil
+                    }
+
+                    ForEach(scopeGenres, id: \.self) { genre in
+                        genreFilterButton(title: genre, isActive: selectedGenreFilter == genre) {
+                            selectedGenreFilter = selectedGenreFilter == genre ? nil : genre
+                        }
+                    }
+                }
+                .padding(.horizontal, 10)
+                .padding(.vertical, 8)
+            }
+            .glowCardStyle(radius: 8, opacity: 0.05)
+        }
+    }
+
+    private func genreFilterButton(title: String, isActive: Bool, action: @escaping () -> Void) -> some View {
+        Button(title, action: action)
+            .buttonStyle(.plain)
+            .padding(.horizontal, 10)
+            .padding(.vertical, 4)
+            .background(
+                Capsule().fill(isActive ? Color.accentColor.opacity(0.92) : Color(nsColor: .windowBackgroundColor))
+            )
+            .overlay(
+                Capsule().stroke(isActive ? Color.accentColor : Color.secondary.opacity(0.25), lineWidth: 1)
+            )
+            .foregroundStyle(isActive ? .white : .primary)
     }
 
     private var bulkEditor: some View {

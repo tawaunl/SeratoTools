@@ -711,13 +711,22 @@ struct ContentView: View {
     }
 
     private func saveTrackMetadataEdit(track: Track, metadata: SeratoTrackMetadataUpdate) throws {
+        let renameEnabled = SeratoFeatureFlags.isAutoRenameFromMetadataEnabled()
         try SeratoTrackMetadataEditor.update(
             track: track,
             metadata: metadata,
             databaseFileURL: libraryService.databaseFile,
-            rewriteFilenameFromMetadata: SeratoFeatureFlags.isAutoRenameFromMetadataEnabled()
+            rewriteFilenameFromMetadata: renameEnabled
         )
-        try libraryService.reloadTracksOnly()
+        if renameEnabled {
+            // Renaming rewrites crate files on disk (see `rewriteCratesPath`),
+            // so a tracks-only reload leaves the in-memory crates pointing at
+            // the old paths — they'd then show as "Not in local library" in
+            // the crate view. Reload crates too to keep them in sync.
+            reloadLibrary()
+        } else {
+            try libraryService.reloadTracksOnly()
+        }
         showMetadataSaveSuccess()
     }
 
