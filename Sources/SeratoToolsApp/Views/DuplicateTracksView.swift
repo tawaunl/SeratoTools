@@ -22,6 +22,12 @@ struct DuplicateTracksView: View {
     @State private var successMessage: String?
     @AppStorage(Self.confirmDeletesDefaultsKey) private var confirmDeletes = true
 
+    /// Ignored indefinitely (persisted). Cleared only from the manage section.
+    @StateObject private var ignoreStore = DuplicateIgnoreStore()
+    /// Ignored just for this session ("ignore this time"); cleared on relaunch.
+    @State private var sessionIgnoredGroupIDs: Set<String> = []
+    @State private var sessionIgnoredTrackPaths: Set<String> = []
+
     private static let confirmDeletesDefaultsKey = "SeratoToolsConfirmDuplicateDeletes"
 
     private struct PendingDeletion: Identifiable {
@@ -45,6 +51,7 @@ struct DuplicateTracksView: View {
                 searchCard
                 messagesBanner
                 resultsCard
+                ignoredItemsCard
             }
             .padding(16)
         }
@@ -96,6 +103,103 @@ struct DuplicateTracksView: View {
                 .font(.callout.weight(.semibold))
                 .foregroundStyle(.red)
         }
+    }
+
+    @ViewBuilder
+    private var ignoredItemsCard: some View {
+        if hasAnyIgnores {
+            VStack(alignment: .leading, spacing: 10) {
+                HStack(spacing: 8) {
+                    Text("Ignored Items")
+                        .font(.title3.weight(.semibold))
+                    Spacer(minLength: 0)
+                    if hasSessionIgnores {
+                        Button("Clear This Session") {
+                            sessionIgnoredGroupIDs.removeAll()
+                            sessionIgnoredTrackPaths.removeAll()
+                        }
+                        .controlSize(.small)
+                        .help("Un-ignore everything ignored 'this time'. Indefinite ignores stay.")
+                    }
+                    if hasIndefiniteIgnores {
+                        Button("Restore All Indefinite") {
+                            ignoreStore.restoreAll()
+                        }
+                        .controlSize(.small)
+                        .help("Un-ignore every group and song ignored indefinitely.")
+                    }
+                }
+
+                if hasSessionIgnores {
+                    Text("This session: \(sessionIgnoredGroupIDs.count) group\(sessionIgnoredGroupIDs.count == 1 ? "" : "s"), \(sessionIgnoredTrackPaths.count) song\(sessionIgnoredTrackPaths.count == 1 ? "" : "s") hidden until relaunch.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+
+                if !ignoreStore.ignoredGroupIDs.isEmpty {
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text("Groups ignored indefinitely (\(ignoreStore.ignoredGroupIDs.count))")
+                            .font(.subheadline.weight(.semibold))
+                        ForEach(ignoreStore.ignoredGroupIDs.sorted(), id: \.self) { groupID in
+                            HStack(spacing: 8) {
+                                Text(groupLabel(forID: groupID))
+                                    .font(.callout)
+                                    .lineLimit(1)
+                                Spacer(minLength: 0)
+                                Button("Restore") { ignoreStore.restoreGroup(groupID) }
+                                    .controlSize(.small)
+                            }
+                        }
+                    }
+                }
+
+                if !ignoreStore.ignoredTrackPaths.isEmpty {
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text("Songs ignored indefinitely (\(ignoreStore.ignoredTrackPaths.count))")
+                            .font(.subheadline.weight(.semibold))
+                        ForEach(ignoreStore.ignoredTrackPaths.sorted(), id: \.self) { storedPath in
+                            HStack(spacing: 8) {
+                                Text(trackLabel(forPath: storedPath))
+                                    .font(.callout)
+                                    .lineLimit(1)
+                                Spacer(minLength: 0)
+                                Button("Restore") { ignoreStore.restoreTrack(storedPath) }
+                                    .controlSize(.small)
+                            }
+                        }
+                    }
+                }
+            }
+            .padding(16)
+            .background(RoundedRectangle(cornerRadius: 12).fill(Color(nsColor: .controlBackgroundColor).opacity(0.55)))
+        }
+    }
+
+    private var hasSessionIgnores: Bool {
+        !sessionIgnoredGroupIDs.isEmpty || !sessionIgnoredTrackPaths.isEmpty
+    }
+
+    private var hasIndefiniteIgnores: Bool {
+        !ignoreStore.ignoredGroupIDs.isEmpty || !ignoreStore.ignoredTrackPaths.isEmpty
+    }
+
+    private var hasAnyIgnores: Bool {
+        hasSessionIgnores || hasIndefiniteIgnores
+    }
+
+    private func groupLabel(forID groupID: String) -> String {
+        if let group = duplicateGroups.first(where: { $0.id == groupID }) {
+            return "\(group.artist) - \(group.title) (\(group.versionLabel))"
+        }
+        return groupID
+    }
+
+    private func trackLabel(forPath storedPath: String) -> String {
+        if let track = libraryService.tracks.first(where: { $0.seratoStoredPath == storedPath }) {
+            let title = track.title.isEmpty ? track.fileURL.lastPathComponent : track.title
+            return track.artist.isEmpty ? title : "\(track.artist) - \(title)"
+        }
+        return (storedPath as NSString).lastPathComponent
     }
 
     private var summaryCard: some View {
@@ -276,6 +380,17 @@ struct DuplicateTracksView: View {
             .disabled(deletable.isEmpty)
             .help("Remove the other copies in this group and move their files to the Trash.")
 
+            Menu("Ignore Group") {
+                Button("Ignore This Time") {
+                    sessionIgnoredGroupIDs.insert(group.id)
+                }
+                Button("Ignore Indefinitely") {
+                    ignoreStore.ignoreGroup(group.id)
+                }
+            }
+            .frame(maxWidth: 150)
+            .help("Skip this group so it isn't shown or deleted. 'This time' clears on relaunch; 'indefinitely' persists until restored.")
+
             Spacer(minLength: 0)
         }
     }
@@ -324,6 +439,21 @@ struct DuplicateTracksView: View {
                     .controlSize(.small)
                     .help("Keep this copy and mark the others in the group for deletion.")
                 }
+
+                Menu {
+                    Button("Ignore This Time") {
+                        sessionIgnoredTrackPaths.insert(track.seratoStoredPath)
+                    }
+                    Button("Ignore Indefinitely") {
+                        ignoreStore.ignoreTrack(track.seratoStoredPath)
+                    }
+                } label: {
+                    Image(systemName: "eye.slash")
+                }
+                .menuStyle(.borderlessButton)
+                .fixedSize()
+                .controlSize(.small)
+                .help("Ignore just this copy so it isn't shown or deleted. 'This time' clears on relaunch; 'indefinitely' persists until restored.")
             }
             Text(track.artist.isEmpty ? track.fileURL.lastPathComponent : track.artist)
                 .font(.caption)
@@ -355,9 +485,9 @@ struct DuplicateTracksView: View {
 
     private var filteredGroups: [DuplicateTrackGroup] {
         let query = searchText.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
-        guard !query.isEmpty else { return duplicateGroups }
+        guard !query.isEmpty else { return visibleGroups }
 
-        return duplicateGroups.filter { group in
+        return visibleGroups.filter { group in
             if group.artist.lowercased().contains(query) { return true }
             if group.title.lowercased().contains(query) { return true }
             if group.versionLabel.lowercased().contains(query) { return true }
@@ -367,6 +497,35 @@ struct DuplicateTracksView: View {
                     || track.fileURL.path.lowercased().contains(query)
             }
         }
+    }
+
+    /// Duplicate groups with ignored groups removed and ignored tracks stripped
+    /// out. A group that drops below two tracks after removing ignored ones is
+    /// no longer a duplicate, so it's hidden too.
+    private var visibleGroups: [DuplicateTrackGroup] {
+        duplicateGroups.compactMap { group in
+            if isGroupIgnored(group.id) { return nil }
+
+            let remaining = group.tracks.filter { !isTrackIgnored($0.seratoStoredPath) }
+            guard remaining.count > 1 else { return nil }
+            if remaining.count == group.tracks.count { return group }
+
+            return DuplicateTrackGroup(
+                id: group.id,
+                artist: group.artist,
+                title: group.title,
+                versionLabel: group.versionLabel,
+                tracks: remaining
+            )
+        }
+    }
+
+    private func isGroupIgnored(_ groupID: String) -> Bool {
+        ignoreStore.isGroupIgnored(groupID) || sessionIgnoredGroupIDs.contains(groupID)
+    }
+
+    private func isTrackIgnored(_ storedPath: String) -> Bool {
+        ignoreStore.isTrackIgnored(storedPath) || sessionIgnoredTrackPaths.contains(storedPath)
     }
 
     private var differentFilenameGroupCount: Int {
@@ -404,7 +563,13 @@ struct DuplicateTracksView: View {
     }
 
     private func keptPath(for group: DuplicateTrackGroup) -> String? {
-        keepSelectionByGroupID[group.id] ?? bestPathByGroupID[group.id]
+        let selected = keepSelectionByGroupID[group.id] ?? bestPathByGroupID[group.id]
+        if let selected, group.tracks.contains(where: { $0.seratoStoredPath == selected }) {
+            return selected
+        }
+        // The selected/best copy was ignored or removed from this group; fall
+        // back to the best of the copies that are still present.
+        return DuplicateTracksService.bestTrack(in: group.tracks)?.seratoStoredPath
     }
 
     private func deletableTracks(for group: DuplicateTrackGroup) -> [Track] {
