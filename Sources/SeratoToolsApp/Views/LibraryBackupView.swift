@@ -80,9 +80,9 @@ struct LibraryBackupView: View {
                 .foregroundStyle(.secondary)
 
             if let successMessage {
-                Text(successMessage)
-                    .font(.callout.weight(.semibold))
-                    .foregroundStyle(.green)
+                SuccessBanner(message: successMessage) {
+                    self.successMessage = nil
+                }
             }
 
             if let errorMessage {
@@ -92,6 +92,7 @@ struct LibraryBackupView: View {
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
+        .animation(.spring(response: 0.4, dampingFraction: 0.85), value: successMessage)
         .padding(18)
         .background(
             RoundedRectangle(cornerRadius: 14)
