@@ -55,9 +55,14 @@ public enum LibraryConsolidationService {
                 return "Serato appears to be running. Close Serato before consolidating the library."
             case .noTracksToMove:
                 return "No track files need to be moved into the selected destination folder."
-            case let .fileTransferFailed(sourceURL, destinationURL, mode, _):
+            case let .fileTransferFailed(sourceURL, destinationURL, mode, underlying):
                 let verb = mode == .copy ? "copy" : "move"
-                return "Couldn't \(verb) \(sourceURL.lastPathComponent) into \(destinationURL.deletingLastPathComponent().path)."
+                let reason = Self.reason(for: underlying)
+                return """
+                Couldn't \(verb) \"\(sourceURL.lastPathComponent)\": \(reason)
+                From: \(sourceURL.path)
+                To: \(destinationURL.path)
+                """
             case let .rollbackFailed(sourceURL, destinationURL):
                 return "A file move failed and rollback could not restore \(destinationURL.lastPathComponent) to \(sourceURL.deletingLastPathComponent().path)."
             }
@@ -69,17 +74,114 @@ public enum LibraryConsolidationService {
                 return "Quit Serato DJ, then run the consolidation again."
             case .noTracksToMove:
                 return "Choose a different destination folder or reload the library if you expected tracks to move."
-            case .fileTransferFailed:
-                return "Check disk permissions and free space, then try again. No Serato paths were rewritten yet."
+            case let .fileTransferFailed(_, _, _, underlying):
+                return Self.recovery(for: underlying)
             case .rollbackFailed:
                 return "Review the destination folder and move any partially moved files back before retrying."
             }
+        }
+
+        /// A human-readable reason for a failed file transfer, derived from the
+        /// underlying `NSError`'s POSIX/Cocoa code, plus the system message so
+        /// nothing is hidden.
+        private static func reason(for error: Error) -> String {
+            let nsError = error as NSError
+            let base = nsError.localizedDescription
+
+            switch Self.classify(nsError) {
+            case .destinationExists:
+                return "a file with that name already exists in the destination."
+            case .noPermission:
+                return "permission was denied. \(base)"
+            case .outOfSpace:
+                return "the destination disk is out of free space."
+            case .sourceMissing:
+                return "the source file no longer exists at its recorded path."
+            case .readOnlyVolume:
+                return "the destination is on a read-only volume."
+            case .unknown:
+                return base
+            }
+        }
+
+        private static func recovery(for error: Error) -> String {
+            switch Self.classify(error as NSError) {
+            case .destinationExists:
+                return "A file with the same name is already in the destination folder. Remove or rename it, or pick a different destination, then try again."
+            case .noPermission:
+                return "Grant SeratoTools access to the source and destination folders (System Settings → Privacy & Security → Files and Folders / Full Disk Access), check the files aren't locked, then try again."
+            case .outOfSpace:
+                return "Free up space on the destination disk, or choose a destination with more room, then try again."
+            case .sourceMissing:
+                return "Reload the library so missing tracks are detected, then run consolidation again. No Serato paths were rewritten."
+            case .readOnlyVolume:
+                return "Choose a destination on a writable volume, then try again."
+            case .unknown:
+                return "Check disk permissions and free space, then try again. No Serato paths were rewritten yet."
+            }
+        }
+
+        private enum TransferFailureKind {
+            case destinationExists
+            case noPermission
+            case outOfSpace
+            case sourceMissing
+            case readOnlyVolume
+            case unknown
+        }
+
+        private static func classify(_ error: NSError) -> TransferFailureKind {
+            // Cocoa file errors carry the most specific code; fall back to the
+            // POSIX errno of an underlying error when present.
+            if error.domain == NSCocoaErrorDomain {
+                switch error.code {
+                case NSFileWriteFileExistsError:
+                    return .destinationExists
+                case NSFileWriteNoPermissionError, NSFileReadNoPermissionError:
+                    return .noPermission
+                case NSFileWriteOutOfSpaceError:
+                    return .outOfSpace
+                case NSFileReadNoSuchFileError, NSFileNoSuchFileError:
+                    return .sourceMissing
+                case NSFileWriteVolumeReadOnlyError:
+                    return .readOnlyVolume
+                default:
+                    break
+                }
+            }
+
+            let posix = Self.posixCode(of: error)
+            switch posix {
+            case EACCES, EPERM:
+                return .noPermission
+            case EEXIST, ENOTEMPTY:
+                return .destinationExists
+            case ENOSPC, EDQUOT:
+                return .outOfSpace
+            case ENOENT:
+                return .sourceMissing
+            case EROFS:
+                return .readOnlyVolume
+            default:
+                return .unknown
+            }
+        }
+
+        private static func posixCode(of error: NSError) -> Int32? {
+            if error.domain == NSPOSIXErrorDomain {
+                return Int32(error.code)
+            }
+            if let underlying = error.userInfo[NSUnderlyingErrorKey] as? NSError {
+                return posixCode(of: underlying)
+            }
+            return nil
         }
     }
 
     public struct ConsolidationResult: Sendable {
         public let processedTrackCount: Int
         public let updatedCrateCount: Int
+        public let skippedMissingCount: Int
         public let destinationFolderURL: URL
         public let mode: FileTransferMode
     }
@@ -233,28 +335,33 @@ public enum LibraryConsolidationService {
             throw ConsolidationError.noTracksToMove
         }
 
+        let outcome = try transferFiles(preview.moves, mode: mode, fileManager: fileManager)
+
+        // Only rewrite paths for files that actually moved; sources that went
+        // missing between preview and execution are skipped, not rewritten.
         let pathMap = Dictionary(
-            uniqueKeysWithValues: preview.moves.map { move in
+            uniqueKeysWithValues: outcome.transferred.map { move in
                 (move.originalStoredPath, SeratoLibraryLocator.seratoStoredPath(for: move.destinationURL, rootDirectory: rootDirectory))
             }
         )
 
-        let transferredPairs = try transferFiles(preview.moves, mode: mode, fileManager: fileManager)
-
         do {
-            _ = try SeratoPathRewriter.rewritePaths(pathMap, in: databaseFileURL)
-
             var updatedCrateCount = 0
-            for crate in crates {
-                let rewrittenPaths = crate.trackPaths.map { pathMap[$0] ?? $0 }
-                guard rewrittenPaths != crate.trackPaths else { continue }
-                _ = try SeratoCrateEditor.rewriteTrackPaths(in: crate, to: rewrittenPaths)
-                updatedCrateCount += 1
+            if !pathMap.isEmpty {
+                _ = try SeratoPathRewriter.rewritePaths(pathMap, in: databaseFileURL)
+
+                for crate in crates {
+                    let rewrittenPaths = crate.trackPaths.map { pathMap[$0] ?? $0 }
+                    guard rewrittenPaths != crate.trackPaths else { continue }
+                    _ = try SeratoCrateEditor.rewriteTrackPaths(in: crate, to: rewrittenPaths)
+                    updatedCrateCount += 1
+                }
             }
 
             return ConsolidationResult(
-                processedTrackCount: transferredPairs.count,
+                processedTrackCount: outcome.transferred.count,
                 updatedCrateCount: updatedCrateCount,
+                skippedMissingCount: outcome.skippedMissing.count,
                 destinationFolderURL: preview.destinationFolderURL,
                 mode: mode
             )
@@ -274,11 +381,20 @@ public enum LibraryConsolidationService {
         _ moves: [LibraryConsolidationPreview.Move],
         mode: FileTransferMode,
         fileManager: FileManager
-    ) throws -> [(sourceURL: URL, destinationURL: URL)] {
-        var transferredPairs: [(sourceURL: URL, destinationURL: URL)] = []
+    ) throws -> TransferOutcome {
+        var transferred: [LibraryConsolidationPreview.Move] = []
+        var skippedMissing: [LibraryConsolidationPreview.Move] = []
 
         do {
             for move in moves {
+                // The library can drift between building the preview and running
+                // it (a track's file is moved or deleted in the meantime). Skip a
+                // source that's gone instead of aborting the whole consolidation.
+                guard fileManager.fileExists(atPath: move.sourceURL.path) else {
+                    skippedMissing.append(move)
+                    continue
+                }
+
                 let destinationDirectory = move.destinationURL.deletingLastPathComponent()
                 try fileManager.createDirectory(at: destinationDirectory, withIntermediateDirectories: true)
                 do {
@@ -289,30 +405,41 @@ public enum LibraryConsolidationService {
                         try fileManager.copyItem(at: move.sourceURL, to: move.destinationURL)
                     }
                 } catch {
+                    // If the source vanished between the existence check and the
+                    // transfer, treat it as missing rather than a hard failure.
+                    if !fileManager.fileExists(atPath: move.sourceURL.path) {
+                        skippedMissing.append(move)
+                        continue
+                    }
                     throw ConsolidationError.fileTransferFailed(move.sourceURL, move.destinationURL, mode: mode, underlying: error)
                 }
-                transferredPairs.append((move.sourceURL, move.destinationURL))
+                transferred.append(move)
             }
-            return transferredPairs
+            return TransferOutcome(transferred: transferred, skippedMissing: skippedMissing)
         } catch {
-            for pair in transferredPairs.reversed() {
+            for move in transferred.reversed() {
                 do {
-                    if fileManager.fileExists(atPath: pair.destinationURL.path) {
+                    if fileManager.fileExists(atPath: move.destinationURL.path) {
                         switch mode {
                         case .move:
-                            let sourceDirectory = pair.sourceURL.deletingLastPathComponent()
+                            let sourceDirectory = move.sourceURL.deletingLastPathComponent()
                             try fileManager.createDirectory(at: sourceDirectory, withIntermediateDirectories: true)
-                            try fileManager.moveItem(at: pair.destinationURL, to: pair.sourceURL)
+                            try fileManager.moveItem(at: move.destinationURL, to: move.sourceURL)
                         case .copy:
-                            try fileManager.removeItem(at: pair.destinationURL)
+                            try fileManager.removeItem(at: move.destinationURL)
                         }
                     }
                 } catch {
-                    throw ConsolidationError.rollbackFailed(pair.sourceURL, pair.destinationURL)
+                    throw ConsolidationError.rollbackFailed(move.sourceURL, move.destinationURL)
                 }
             }
             throw error
         }
+    }
+
+    private struct TransferOutcome {
+        let transferred: [LibraryConsolidationPreview.Move]
+        let skippedMissing: [LibraryConsolidationPreview.Move]
     }
 
     private static func fileSizeOfItem(at url: URL, fileManager: FileManager) -> Int64? {

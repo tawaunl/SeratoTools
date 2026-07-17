@@ -185,4 +185,62 @@ struct LibraryConsolidationServiceTests {
     #expect(destinationEntries.allSatisfy { $0.hasDirectoryPath == false })
 }
 
+@Test func consolidationSkipsSourceFilesMissingAtRunTime() throws {
+    let scratch = try makeScratchLibrary()
+    defer { try? FileManager.default.removeItem(at: scratch.rootDirectory) }
+
+    SeratoBackupBeforeWrite.backupDirectory = scratch.rootDirectory.appendingPathComponent("Backups")
+
+    let tracks = try SeratoDatabaseParser.parseTracks(at: scratch.databaseFile, rootDirectory: scratch.rootDirectory)
+    let crate = try SeratoCrateParser.parseCrate(at: scratch.crateFile)
+    let selectedPaths = Array(crate.trackPaths.prefix(2))
+    #expect(selectedPaths.count == 2)
+
+    let selectedTracks = tracks.filter { selectedPaths.contains($0.seratoStoredPath) }
+    #expect(selectedTracks.count == 2)
+
+    for track in selectedTracks {
+        let directory = track.fileURL.deletingLastPathComponent()
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        try Data("test".utf8).write(to: track.fileURL)
+    }
+
+    let destinationFolder = scratch.rootDirectory.appendingPathComponent("Consolidated Missing", isDirectory: true)
+    let preview = LibraryConsolidationService.preview(
+        tracks: selectedTracks,
+        destinationFolderURL: destinationFolder,
+        homeDirectory: scratch.rootDirectory
+    )
+    #expect(preview.totalMoves == 2)
+
+    // Delete one source after the preview to simulate the library drifting
+    // (the file is gone by the time consolidation runs).
+    let missingMove = preview.moves[0]
+    try FileManager.default.removeItem(at: missingMove.sourceURL)
+
+    let result = try LibraryConsolidationService.consolidate(
+        preview: preview,
+        mode: .move,
+        crates: [Crate(pathComponents: crate.pathComponents, trackPaths: crate.trackPaths, fileURL: scratch.crateFile)],
+        rootDirectory: scratch.rootDirectory,
+        databaseFileURL: scratch.databaseFile
+    )
+
+    // The consolidation succeeds: the present file moves, the missing one is
+    // skipped rather than aborting the whole run.
+    #expect(result.processedTrackCount == 1)
+    #expect(result.skippedMissingCount == 1)
+
+    let survivingMove = preview.moves[1]
+    #expect(FileManager.default.fileExists(atPath: survivingMove.destinationURL.path))
+    #expect(!FileManager.default.fileExists(atPath: missingMove.destinationURL.path))
+
+    // Only the moved file's path is rewritten; the missing file's original
+    // path stays untouched in the database.
+    let reparsedTracks = try SeratoDatabaseParser.parseTracks(at: scratch.databaseFile, rootDirectory: scratch.rootDirectory)
+    let survivingStoredPath = SeratoLibraryLocator.seratoStoredPath(for: survivingMove.destinationURL, rootDirectory: scratch.rootDirectory)
+    #expect(reparsedTracks.contains { $0.seratoStoredPath == survivingStoredPath })
+    #expect(reparsedTracks.contains { $0.seratoStoredPath == missingMove.originalStoredPath })
+}
+
 }

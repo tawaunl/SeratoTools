@@ -125,6 +125,9 @@ struct LibraryConsolidationView: View {
                 Text(errorMessage)
                     .font(.callout.weight(.semibold))
                     .foregroundStyle(.red)
+                    .multilineTextAlignment(.leading)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .textSelection(.enabled)
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
@@ -622,11 +625,22 @@ struct LibraryConsolidationView: View {
                 databaseFileURL: libraryService.databaseFile
             )
             let verb = result.mode == .copy ? "Copied" : "Moved"
-            successMessage = "\(verb) \(result.processedTrackCount) track files into \(result.destinationFolderURL.lastPathComponent) and updated \(result.updatedCrateCount) crates."
+            var message = "\(verb) \(result.processedTrackCount) track files into \(result.destinationFolderURL.lastPathComponent) and updated \(result.updatedCrateCount) crates."
+            if result.skippedMissingCount > 0 {
+                let fileWord = result.skippedMissingCount == 1 ? "file" : "files"
+                message += " Skipped \(result.skippedMissingCount) missing source \(fileWord) that were no longer on disk."
+            }
+            successMessage = message
             onLibraryChanged()
             refreshPreview()
         } catch {
-            errorMessage = error.localizedDescription
+            if let localized = error as? LocalizedError,
+               let suggestion = localized.recoverySuggestion,
+               !suggestion.isEmpty {
+                errorMessage = "\(error.localizedDescription)\n\n\(suggestion)"
+            } else {
+                errorMessage = error.localizedDescription
+            }
         }
     }
 }
