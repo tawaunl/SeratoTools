@@ -107,6 +107,7 @@ struct YouTubeRipView: View {
     @State private var isLoadingBatchInfo = false
     @State private var dependencyStatusMessage: String?
     @State private var dependencyReady = false
+    @State private var isCheckingDependencies = false
     @State private var isInstallingDependencies = false
     @State private var errorMessage: String?
     @State private var successMessage: String?
@@ -194,6 +195,13 @@ struct YouTubeRipView: View {
 
     private var dependencyBadgeColor: Color {
         dependencyReady ? .green : .red
+    }
+
+    private var dependencyStatusColor: Color {
+        if isCheckingDependencies {
+            return .secondary
+        }
+        return dependencyReady ? .secondary : .red
     }
 
     private var availableCrates: [Crate] {
@@ -337,7 +345,7 @@ struct YouTubeRipView: View {
 
             TextEditor(text: $urlText)
                 .font(.body.monospaced())
-                .frame(minHeight: 110)
+                .frame(height: 64)
                 .padding(8)
                 .background(
                     RoundedRectangle(cornerRadius: 8)
@@ -358,9 +366,10 @@ struct YouTubeRipView: View {
                     chooseLinksFile()
                 }
                 .help("Import a list of video links from a CSV or Excel file for batch downloading.")
-                Button("Check yt-dlp + ffmpeg") {
+                Button(isCheckingDependencies ? "Checking..." : "Check yt-dlp + ffmpeg") {
                     checkDependencies()
                 }
+                .disabled(isCheckingDependencies)
                 .help("Verify that the yt-dlp and ffmpeg command-line tools are installed.")
                 if !dependencyReady {
                     Button(isInstallingDependencies ? "Installing..." : "Install Dependencies") {
@@ -375,6 +384,11 @@ struct YouTubeRipView: View {
                 }
 
                 if isLoadingBatchInfo {
+                    ProgressView()
+                        .controlSize(.small)
+                }
+
+                if isCheckingDependencies {
                     ProgressView()
                         .controlSize(.small)
                 }
@@ -399,7 +413,7 @@ struct YouTubeRipView: View {
             if let dependencyStatusMessage {
                 Text(dependencyStatusMessage)
                     .font(.footnote)
-                    .foregroundColor(dependencyReady ? .secondary : .red)
+                    .foregroundColor(dependencyStatusColor)
             }
         }
         .padding(16)
@@ -1250,18 +1264,49 @@ struct YouTubeRipView: View {
     }
 
     private func checkDependencies() {
-        let status = YouTubeAudioImportService.dependencyStatus()
+        guard !isCheckingDependencies else { return }
+        isCheckingDependencies = true
+        dependencyStatusMessage = "Checking yt-dlp and ffmpeg..."
+
+        Task {
+            let status = await Task.detached(priority: .userInitiated) {
+                YouTubeAudioImportService.dependencyStatus()
+            }.value
+
+            let version: String? = status.isReady
+                ? await Task.detached(priority: .userInitiated) {
+                    YouTubeAudioImportService.installedYTDLPVersion()
+                }.value
+                : nil
+
+            await MainActor.run {
+                isCheckingDependencies = false
+                applyDependencyStatus(status, ytDLPVersion: version)
+            }
+        }
+    }
+
+    @discardableResult
+    private func applyDependencyStatus(
+        _ status: YouTubeAudioImportService.DependencyStatus,
+        ytDLPVersion: String?
+    ) -> Bool {
         dependencyReady = status.isReady
 
         if status.isReady {
-            dependencyStatusMessage = "Ready: yt-dlp at \(status.ytDLPPath ?? "") and ffmpeg at \(status.ffmpegPath ?? "")."
-            return
+            if let ytDLPVersion {
+                dependencyStatusMessage = "Ready: yt-dlp \(ytDLPVersion) and ffmpeg are installed."
+            } else {
+                dependencyStatusMessage = "Ready: yt-dlp and ffmpeg are installed."
+            }
+            return true
         }
 
         var missing: [String] = []
         if status.ytDLPPath == nil { missing.append("yt-dlp") }
         if status.ffmpegPath == nil { missing.append("ffmpeg") }
         dependencyStatusMessage = "Missing dependencies: \(missing.joined(separator: ", ")). Click Install Dependencies, or run: brew install yt-dlp ffmpeg."
+        return false
     }
 
     private func installDependencies() {
@@ -1274,11 +1319,25 @@ struct YouTubeRipView: View {
                 try? YouTubeAudioImportService.installDependencies()
             }.value
 
+            let status = await Task.detached(priority: .userInitiated) {
+                YouTubeAudioImportService.dependencyStatus()
+            }.value
+
+            let version: String? = status.isReady
+                ? await Task.detached(priority: .userInitiated) {
+                    YouTubeAudioImportService.installedYTDLPVersion()
+                }.value
+                : nil
+
             await MainActor.run {
                 isInstallingDependencies = false
-                checkDependencies()
-                if dependencyReady {
-                    dependencyStatusMessage = "Dependencies installed. yt-dlp and ffmpeg are ready."
+                let ready = applyDependencyStatus(status, ytDLPVersion: version)
+                if ready {
+                    if let version {
+                        dependencyStatusMessage = "Dependencies installed. yt-dlp \(version) and ffmpeg are ready."
+                    } else {
+                        dependencyStatusMessage = "Dependencies installed. yt-dlp and ffmpeg are ready."
+                    }
                 } else if let result, !result.succeeded {
                     dependencyStatusMessage = "Could not install all dependencies automatically. Try: brew install yt-dlp ffmpeg chromaprint. Details logged to /tmp/seratotools-install-dependencies.log."
                 }

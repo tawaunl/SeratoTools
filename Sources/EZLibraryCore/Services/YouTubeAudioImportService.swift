@@ -227,6 +227,17 @@ public enum YouTubeAudioImportService {
         return DependencyStatus(ytDLPPath: ytDLPPath, ffmpegPath: ffmpegPath)
     }
 
+    /// Returns the installed yt-dlp version string (e.g. "2024.08.06"), or nil
+    /// when yt-dlp can't be found or run. Used to give the user visible feedback
+    /// about which yt-dlp build is active when they check dependencies.
+    public static func installedYTDLPVersion() -> String? {
+        guard let result = try? runYTCommand(arguments: ["--version"]) else {
+            return nil
+        }
+        let version = result.stdout.trimmingCharacters(in: .whitespacesAndNewlines)
+        return version.isEmpty ? nil : version
+    }
+
     /// yt-dlp must track YouTube's frequent site changes, so a Homebrew (or any
     /// on-PATH system) copy is preferred. When Homebrew isn't installed, the
     /// user-writable self-updating copy the app maintains is used as a fallback.
