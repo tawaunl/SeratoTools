@@ -74,13 +74,11 @@ struct PlaylistMatchView: View {
     @State private var planStatusByID: [UUID: String] = [:]
     @State private var searchingPlanIDs: Set<UUID> = []
     @State private var youtubeSuggestionsByPlanID: [UUID: [YouTubeAudioImportService.SearchResult]] = [:]
-    @State private var hoveredSuggestionKey: String?
     @State private var matchedYoutubeURLByEntryID: [UUID: String] = [:]
     @State private var matchedStatusByEntryID: [UUID: String] = [:]
     @State private var matchedSearchingEntryIDs: Set<UUID> = []
     @State private var matchedRippingEntryIDs: Set<UUID> = []
     @State private var matchedSuggestionsByEntryID: [UUID: [YouTubeAudioImportService.SearchResult]] = [:]
-    @State private var hoveredMatchedSuggestionKey: String?
 
     @State private var purchaseLinksByPlanID: [UUID: [PurchaseLinkService.PurchaseLink]] = [:]
     @State private var loadingPurchaseLinkPlanIDs: Set<UUID> = []
@@ -304,7 +302,7 @@ struct PlaylistMatchView: View {
                         .foregroundStyle(.secondary)
                         .padding(.top, 4)
                 } else {
-                    VStack(alignment: .leading, spacing: 4) {
+                    LazyVStack(alignment: .leading, spacing: 4) {
                         ForEach(Array(visibleEntries.prefix(20))) { item in
                         VStack(alignment: .leading, spacing: 4) {
                             let artist = item.entry.artist.isEmpty ? "Unknown Artist" : item.entry.artist
@@ -527,8 +525,10 @@ struct PlaylistMatchView: View {
                         .font(.footnote)
                         .foregroundStyle(.secondary)
 
-                    ForEach(excludedMatches) { item in
-                        excludedMatchRow(for: item)
+                    LazyVStack(alignment: .leading, spacing: 0) {
+                        ForEach(excludedMatches) { item in
+                            excludedMatchRow(for: item)
+                        }
                     }
                 }
 
@@ -541,6 +541,7 @@ struct PlaylistMatchView: View {
                         .font(.footnote)
                         .foregroundStyle(.secondary)
 
+                    LazyVStack(alignment: .leading, spacing: 0) {
                     ForEach(planItems) { item in
                     let artist = item.entry.artist.isEmpty ? "Unknown Artist" : item.entry.artist
                     VStack(alignment: .leading, spacing: 8) {
@@ -601,6 +602,7 @@ struct PlaylistMatchView: View {
                     )
                     .padding(.vertical, 4)
                 }
+                    }
                 }
             }
         }
@@ -821,86 +823,19 @@ struct PlaylistMatchView: View {
                         .foregroundStyle(.secondary)
 
                     ScrollView {
-                        VStack(alignment: .leading, spacing: 6) {
-                    ForEach(suggestions) { suggestion in
-                        let isHovered = hoveredSuggestionKey == suggestionRowKey(planID: item.id, suggestionID: suggestion.id)
-                        HStack(alignment: .top, spacing: 8) {
-                            VStack(alignment: .leading, spacing: 2) {
-                                HStack(spacing: 4) {
-                                    Text(suggestion.title)
-                                        .font(.caption)
-                                        .lineLimit(1)
-
-                                    Button {
-                                        NSWorkspace.shared.open(suggestion.webpageURL)
-                                    } label: {
-                                        Image(systemName: "arrow.up.right.square")
-                                            .font(.caption2)
+                        LazyVStack(alignment: .leading, spacing: 6) {
+                            ForEach(suggestions) { suggestion in
+                                SuggestionRow(
+                                    suggestion: suggestion,
+                                    isRipping: rippingPlanIDs.contains(item.id),
+                                    onUseLink: {
+                                        youtubeURLByPlanID[item.id] = suggestion.webpageURL.absoluteString
+                                    },
+                                    onUseAndDownload: {
+                                        ripPlanItemFromYouTube(item, preferredURL: suggestion.webpageURL)
                                     }
-                                    .buttonStyle(.plain)
-                                    .foregroundStyle(.secondary)
-                                    .help("Open this result in your browser to check the exact link.")
-                                }
-
-                                HStack(spacing: 6) {
-                                    Text(suggestionSourceName(suggestion.webpageURL))
-                                        .font(.caption2.weight(.semibold))
-                                        .padding(.horizontal, 6)
-                                        .padding(.vertical, 1)
-                                        .background(Capsule().fill(suggestionSourceColor(suggestion.webpageURL).opacity(0.18)))
-                                        .foregroundStyle(suggestionSourceColor(suggestion.webpageURL))
-
-                                    Text(suggestion.channel)
-                                        .font(.caption2)
-                                        .foregroundStyle(.secondary)
-                                        .lineLimit(1)
-                                }
+                                )
                             }
-
-                            Spacer(minLength: 0)
-
-                            HStack(spacing: 6) {
-                                Button("Use Link") {
-                                    youtubeURLByPlanID[item.id] = suggestion.webpageURL.absoluteString
-                                }
-                                .buttonStyle(.bordered)
-                                .controlSize(.small)
-                                .help("Use this suggestion's URL in the field above.")
-
-                                Button(rippingPlanIDs.contains(item.id) ? "Downloading..." : "Use + Download") {
-                                    ripPlanItemFromYouTube(item, preferredURL: suggestion.webpageURL)
-                                }
-                                .buttonStyle(.borderedProminent)
-                                .controlSize(.small)
-                                .disabled(rippingPlanIDs.contains(item.id))
-                                .help("Download this suggestion's audio and add it to your library.")
-                            }
-                            .padding(.horizontal, 6)
-                            .padding(.vertical, 5)
-                            .background(
-                                RoundedRectangle(cornerRadius: 8)
-                                    .fill(Color(nsColor: .windowBackgroundColor).opacity(0.9))
-                            )
-                            .overlay(
-                                RoundedRectangle(cornerRadius: 8)
-                                    .stroke(Color.secondary.opacity(0.2), lineWidth: 1)
-                            )
-                        }
-                        .padding(.horizontal, 8)
-                        .padding(.vertical, 7)
-                        .background(
-                            RoundedRectangle(cornerRadius: 8)
-                                .fill(Color.accentColor.opacity(isHovered ? 0.18 : 0.08))
-                        )
-                        .overlay(
-                            RoundedRectangle(cornerRadius: 8)
-                                .stroke(Color.accentColor.opacity(isHovered ? 0.42 : 0.22), lineWidth: 1)
-                        )
-                        .onHover { hovering in
-                            let key = suggestionRowKey(planID: item.id, suggestionID: suggestion.id)
-                            hoveredSuggestionKey = hovering ? key : (hoveredSuggestionKey == key ? nil : hoveredSuggestionKey)
-                        }
-                    }
                         }
                     }
                     .frame(maxHeight: 210)
@@ -952,86 +887,19 @@ struct PlaylistMatchView: View {
                         .foregroundStyle(.secondary)
 
                     ScrollView {
-                        VStack(alignment: .leading, spacing: 6) {
-                    ForEach(suggestions) { suggestion in
-                        let isHovered = hoveredMatchedSuggestionKey == matchedSuggestionRowKey(entryID: entry.id, suggestionID: suggestion.id)
-                        HStack(alignment: .top, spacing: 8) {
-                            VStack(alignment: .leading, spacing: 2) {
-                                HStack(spacing: 4) {
-                                    Text(suggestion.title)
-                                        .font(.caption)
-                                        .lineLimit(1)
-
-                                    Button {
-                                        NSWorkspace.shared.open(suggestion.webpageURL)
-                                    } label: {
-                                        Image(systemName: "arrow.up.right.square")
-                                            .font(.caption2)
+                        LazyVStack(alignment: .leading, spacing: 6) {
+                            ForEach(suggestions) { suggestion in
+                                SuggestionRow(
+                                    suggestion: suggestion,
+                                    isRipping: matchedRippingEntryIDs.contains(entry.id),
+                                    onUseLink: {
+                                        matchedYoutubeURLByEntryID[entry.id] = suggestion.webpageURL.absoluteString
+                                    },
+                                    onUseAndDownload: {
+                                        ripMatchedEntryFromYouTube(entry, preferredURL: suggestion.webpageURL)
                                     }
-                                    .buttonStyle(.plain)
-                                    .foregroundStyle(.secondary)
-                                    .help("Open this result in your browser to check the exact link.")
-                                }
-
-                                HStack(spacing: 6) {
-                                    Text(suggestionSourceName(suggestion.webpageURL))
-                                        .font(.caption2.weight(.semibold))
-                                        .padding(.horizontal, 6)
-                                        .padding(.vertical, 1)
-                                        .background(Capsule().fill(suggestionSourceColor(suggestion.webpageURL).opacity(0.18)))
-                                        .foregroundStyle(suggestionSourceColor(suggestion.webpageURL))
-
-                                    Text(suggestion.channel)
-                                        .font(.caption2)
-                                        .foregroundStyle(.secondary)
-                                        .lineLimit(1)
-                                }
+                                )
                             }
-
-                            Spacer(minLength: 0)
-
-                            HStack(spacing: 6) {
-                                Button("Use Link") {
-                                    matchedYoutubeURLByEntryID[entry.id] = suggestion.webpageURL.absoluteString
-                                }
-                                .buttonStyle(.bordered)
-                                .controlSize(.small)
-                                .help("Use this suggestion's URL in the field above.")
-
-                                Button(matchedRippingEntryIDs.contains(entry.id) ? "Downloading..." : "Use + Download") {
-                                    ripMatchedEntryFromYouTube(entry, preferredURL: suggestion.webpageURL)
-                                }
-                                .buttonStyle(.borderedProminent)
-                                .controlSize(.small)
-                                .disabled(matchedRippingEntryIDs.contains(entry.id))
-                                .help("Download this suggestion's audio and add it to your library.")
-                            }
-                            .padding(.horizontal, 6)
-                            .padding(.vertical, 5)
-                            .background(
-                                RoundedRectangle(cornerRadius: 8)
-                                    .fill(Color(nsColor: .windowBackgroundColor).opacity(0.9))
-                            )
-                            .overlay(
-                                RoundedRectangle(cornerRadius: 8)
-                                    .stroke(Color.secondary.opacity(0.2), lineWidth: 1)
-                            )
-                        }
-                        .padding(.horizontal, 8)
-                        .padding(.vertical, 7)
-                        .background(
-                            RoundedRectangle(cornerRadius: 8)
-                                .fill(Color.accentColor.opacity(isHovered ? 0.18 : 0.08))
-                        )
-                        .overlay(
-                            RoundedRectangle(cornerRadius: 8)
-                                .stroke(Color.accentColor.opacity(isHovered ? 0.42 : 0.22), lineWidth: 1)
-                        )
-                        .onHover { hovering in
-                            let key = matchedSuggestionRowKey(entryID: entry.id, suggestionID: suggestion.id)
-                            hoveredMatchedSuggestionKey = hovering ? key : (hoveredMatchedSuggestionKey == key ? nil : hoveredMatchedSuggestionKey)
-                        }
-                    }
                         }
                     }
                     .frame(maxHeight: 210)
@@ -1085,13 +953,11 @@ struct PlaylistMatchView: View {
         planStatusByID = [:]
         searchingPlanIDs = []
         youtubeSuggestionsByPlanID = [:]
-        hoveredSuggestionKey = nil
         matchedYoutubeURLByEntryID = [:]
         matchedStatusByEntryID = [:]
         matchedSearchingEntryIDs = []
         matchedRippingEntryIDs = []
         matchedSuggestionsByEntryID = [:]
-        hoveredMatchedSuggestionKey = nil
         purchaseLinksByPlanID = [:]
         loadingPurchaseLinkPlanIDs = []
         purchaseLinksByEntryID = [:]
@@ -1099,25 +965,6 @@ struct PlaylistMatchView: View {
         successMessage = nil
         warningMessage = nil
         errorMessage = nil
-    }
-
-    private func suggestionRowKey(planID: UUID, suggestionID: String) -> String {
-        "\(planID.uuidString)|\(suggestionID)"
-    }
-
-    private func matchedSuggestionRowKey(entryID: UUID, suggestionID: String) -> String {
-        "\(entryID.uuidString)|\(suggestionID)"
-    }
-
-    private func suggestionSourceName(_ url: URL) -> String {
-        let host = url.host?.lowercased() ?? ""
-        if host.contains("soundcloud") { return "SoundCloud" }
-        if host.contains("youtube") || host.contains("youtu.be") { return "YouTube" }
-        return "Web"
-    }
-
-    private func suggestionSourceColor(_ url: URL) -> Color {
-        (url.host?.lowercased().contains("soundcloud") ?? false) ? .orange : .red
     }
 
     private func confidenceColor(_ confidence: PlaylistMatchService.MatchConfidence) -> Color {
@@ -2274,6 +2121,102 @@ private struct DisclosureGroupRow<Content: View>: View {
         .frame(maxWidth: .infinity, alignment: .leading)
     }
 }
+
+/// A single in-app search suggestion (YouTube or SoundCloud). Extracted into
+/// its own view so hover state stays local — hovering a row only re-renders
+/// that row instead of the whole PlaylistMatch screen.
+private struct SuggestionRow: View {
+    let suggestion: YouTubeAudioImportService.SearchResult
+    let isRipping: Bool
+    let onUseLink: () -> Void
+    let onUseAndDownload: () -> Void
+
+    @State private var isHovered = false
+
+    private var sourceName: String {
+        let host = suggestion.webpageURL.host?.lowercased() ?? ""
+        if host.contains("soundcloud") { return "SoundCloud" }
+        if host.contains("youtube") || host.contains("youtu.be") { return "YouTube" }
+        return "Web"
+    }
+
+    private var sourceColor: Color {
+        (suggestion.webpageURL.host?.lowercased().contains("soundcloud") ?? false) ? .orange : .red
+    }
+
+    var body: some View {
+        HStack(alignment: .top, spacing: 8) {
+            VStack(alignment: .leading, spacing: 2) {
+                HStack(spacing: 4) {
+                    Text(suggestion.title)
+                        .font(.caption)
+                        .lineLimit(1)
+
+                    Button {
+                        NSWorkspace.shared.open(suggestion.webpageURL)
+                    } label: {
+                        Image(systemName: "arrow.up.right.square")
+                            .font(.caption2)
+                    }
+                    .buttonStyle(.plain)
+                    .foregroundStyle(.secondary)
+                    .help("Open this result in your browser to check the exact link.")
+                }
+
+                HStack(spacing: 6) {
+                    Text(sourceName)
+                        .font(.caption2.weight(.semibold))
+                        .padding(.horizontal, 6)
+                        .padding(.vertical, 1)
+                        .background(Capsule().fill(sourceColor.opacity(0.18)))
+                        .foregroundStyle(sourceColor)
+
+                    Text(suggestion.channel)
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                }
+            }
+
+            Spacer(minLength: 0)
+
+            HStack(spacing: 6) {
+                Button("Use Link", action: onUseLink)
+                    .buttonStyle(.bordered)
+                    .controlSize(.small)
+                    .help("Use this suggestion's URL in the field above.")
+
+                Button(isRipping ? "Downloading..." : "Use + Download", action: onUseAndDownload)
+                    .buttonStyle(.borderedProminent)
+                    .controlSize(.small)
+                    .disabled(isRipping)
+                    .help("Download this suggestion's audio and add it to your library.")
+            }
+            .padding(.horizontal, 6)
+            .padding(.vertical, 5)
+            .background(
+                RoundedRectangle(cornerRadius: 8)
+                    .fill(Color(nsColor: .windowBackgroundColor).opacity(0.9))
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: 8)
+                    .stroke(Color.secondary.opacity(0.2), lineWidth: 1)
+            )
+        }
+        .padding(.horizontal, 8)
+        .padding(.vertical, 7)
+        .background(
+            RoundedRectangle(cornerRadius: 8)
+                .fill(Color.accentColor.opacity(isHovered ? 0.18 : 0.08))
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 8)
+                .stroke(Color.accentColor.opacity(isHovered ? 0.42 : 0.22), lineWidth: 1)
+        )
+        .onHover { isHovered = $0 }
+    }
+}
+
 
 private struct CachedState {
     let rawInput: String
