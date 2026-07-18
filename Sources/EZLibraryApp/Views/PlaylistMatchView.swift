@@ -2141,7 +2141,7 @@ private struct SuggestionRow: View {
     }
 
     private var sourceColor: Color {
-        (suggestion.webpageURL.host?.lowercased().contains("soundcloud") ?? false) ? .orange : .red
+        (suggestion.webpageURL.host?.lowercased().contains("soundcloud") ?? false) ? .orange : .secondary
     }
 
     var body: some View {
