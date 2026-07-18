@@ -12,8 +12,10 @@
 #      re-targets the work to the current console (GUI) user, because Homebrew
 #      refuses to run as root.
 #
-# The script is best-effort: the shipped app already bundles portable copies of
-# these tools, so a failure here never blocks the app. All output is logged.
+# The script is best-effort and idempotent. The app relies entirely on these
+# Homebrew-managed tools (nothing is bundled) and checks them on every launch,
+# so a transient failure here is retried the next time the app opens. All
+# output is logged.
 set -u
 
 LOG_FILE="${SERATOTOOLS_DEPS_LOG:-/tmp/seratotools-install-dependencies.log}"
@@ -170,7 +172,7 @@ main() {
 
 	if [[ -z "$brew_path" ]]; then
 		log "Homebrew is unavailable; cannot install yt-dlp/ffmpeg/chromaprint."
-		log "The app still works using its bundled runtime tools."
+		log "The app will prompt to install these tools again on its next launch."
 		exit 0
 	fi
 
@@ -187,7 +189,7 @@ main() {
 		log "Dependency bootstrap finished with some failures (see $LOG_FILE)."
 	fi
 
-	# Never fail the caller (e.g. the installer); the app bundles fallbacks.
+	# Never fail the caller (e.g. the installer); the app re-checks on launch.
 	exit 0
 }
 

@@ -36,6 +36,7 @@ struct ContentView: View {
     private let middlePaneWidth: CGFloat = 320
 
     @EnvironmentObject private var libraryService: LibraryService
+    @EnvironmentObject private var dependencyReadiness: DependencyReadinessModel
     @ObservedObject var crateHierarchy: CrateHierarchyViewModel
     @ObservedObject var smartCrateHierarchy: CrateHierarchyViewModel
 
@@ -93,6 +94,7 @@ struct ContentView: View {
     var body: some View {
         Group {
             VStack(spacing: 0) {
+                DependencyReadinessBanner(model: dependencyReadiness)
                 HSplitView {
                     sidebar
                     middleContent

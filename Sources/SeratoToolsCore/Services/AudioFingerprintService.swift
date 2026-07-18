@@ -454,6 +454,15 @@ public enum AudioFingerprintService {
         return "\(prefix)…\(suffix) (len=\(trimmed.count))"
     }
 
+    /// Resolved path to the `fpcalc` executable (from Homebrew's chromaprint),
+    /// or nil when it isn't installed. Exposed so the app can report readiness.
+    public static func fpcalcExecutablePath(
+        environment: [String: String] = ProcessInfo.processInfo.environment,
+        fileManager: FileManager = .default
+    ) -> String? {
+        resolveFpcalcPath(environment: environment, fileManager: fileManager)
+    }
+
     private static func resolveFpcalcPath(
         environment: [String: String] = ProcessInfo.processInfo.environment,
         fileManager: FileManager = .default
@@ -464,10 +473,6 @@ public enum AudioFingerprintService {
             return override
         }
 
-        if let bundled = bundledExecutablePath(named: "fpcalc", fileManager: fileManager) {
-            return bundled
-        }
-
         let candidates = [
             "/opt/homebrew/bin/fpcalc",
             "/usr/local/bin/fpcalc",
@@ -476,26 +481,6 @@ public enum AudioFingerprintService {
 
         for path in candidates where fileManager.isExecutableFile(atPath: path) {
             return path
-        }
-
-        return nil
-    }
-
-    private static func bundledExecutablePath(named name: String, fileManager: FileManager) -> String? {
-        let bundle = Bundle.main
-        let candidates: [URL?] = [
-            bundle.resourceURL?.appendingPathComponent("bin/\(name)", isDirectory: false),
-            bundle.bundleURL
-                .appendingPathComponent("Contents", isDirectory: true)
-                .appendingPathComponent("Resources", isDirectory: true)
-                .appendingPathComponent("bin", isDirectory: true)
-                .appendingPathComponent(name, isDirectory: false)
-        ]
-
-        for candidate in candidates.compactMap({ $0 }) {
-            if fileManager.isExecutableFile(atPath: candidate.path) {
-                return candidate.path
-            }
         }
 
         return nil

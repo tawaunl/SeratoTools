@@ -49,6 +49,7 @@ struct SeratoToolsApp: App {
     @StateObject private var smartCrateHierarchy: CrateHierarchyViewModel
     @StateObject private var missingTracksService: MissingTracksService
     @StateObject private var updateChecker = UpdateCheckViewModel()
+    @StateObject private var dependencyReadiness = DependencyReadinessModel()
     @ObservedObject private var themeController = ThemeController.shared
 
     init() {
@@ -81,11 +82,18 @@ struct SeratoToolsApp: App {
                 .environmentObject(libraryService)
                 .environmentObject(hiddenCrateStore)
                 .environmentObject(missingTracksService)
+                .environmentObject(dependencyReadiness)
                 .sheet(isPresented: $updateChecker.isPresented) {
                     UpdateCheckView(viewModel: updateChecker)
                 }
                 .task {
                     await updateChecker.runAutomaticCheckIfDue()
+                }
+                .task {
+                    // Verify on every launch that the Homebrew-managed tools
+                    // (yt-dlp, ffmpeg, fpcalc) are installed and current, and
+                    // surface the readiness banner when they aren't.
+                    await dependencyReadiness.checkOnLaunch()
                 }
                 .task {
                     // Keep a user-writable yt-dlp current in the background so

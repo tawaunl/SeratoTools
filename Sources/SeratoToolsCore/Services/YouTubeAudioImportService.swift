@@ -212,51 +212,43 @@ public enum YouTubeAudioImportService {
     }
 
     public static func dependencyStatus(environment: [String: String] = ProcessInfo.processInfo.environment) -> DependencyStatus {
-        let bundledYTDLP = bundledExecutablePath(named: "yt-dlp")
-        let bundledFFmpeg = bundledExecutablePath(named: "ffmpeg")
-
         let ytDLPPath = findExecutablePath(
             named: "yt-dlp",
-            preferredPaths: preferredYTDLPPaths(bundled: bundledYTDLP),
+            preferredPaths: preferredYTDLPPaths(),
             environment: environment
         )
 
         let ffmpegPath = findExecutablePath(
             named: "ffmpeg",
-            preferredPaths: preferredFFmpegPaths(bundled: bundledFFmpeg),
+            preferredPaths: preferredFFmpegPaths(),
             environment: environment
         )
 
         return DependencyStatus(ytDLPPath: ytDLPPath, ffmpegPath: ffmpegPath)
     }
 
-    /// yt-dlp must track YouTube's frequent site changes, so a system copy
-    /// (kept current by Homebrew / the user) is preferred over the snapshot
-    /// bundled at build time, which goes stale and then fails to fetch info or
-    /// download. A user-writable self-updating copy comes next, and the bundled
-    /// binary stays as an offline fallback.
-    private static func preferredYTDLPPaths(bundled: String?) -> [String] {
+    /// yt-dlp must track YouTube's frequent site changes, so a Homebrew (or any
+    /// on-PATH system) copy is preferred. When Homebrew isn't installed, the
+    /// user-writable self-updating copy the app maintains is used as a fallback.
+    private static func preferredYTDLPPaths() -> [String] {
         let managed = managedYTDLPURL().path
         return [
             "/opt/homebrew/bin/yt-dlp",
             "/usr/local/bin/yt-dlp",
             "/usr/bin/yt-dlp",
-            FileManager.default.isExecutableFile(atPath: managed) ? managed : nil,
-            bundled
+            FileManager.default.isExecutableFile(atPath: managed) ? managed : nil
         ].compactMap { $0 }
     }
 
-    /// A working ffmpeg is preferred from the system first, falling back to the
-    /// bundled copy. yt-dlp needs to be told where it is (see `downloadAudio`),
-    /// because a GUI app launched from Finder has a minimal PATH that includes
-    /// neither Homebrew nor the app's bundled binaries.
-    private static func preferredFFmpegPaths(bundled: String?) -> [String] {
+    /// ffmpeg is resolved from Homebrew (or any system location on PATH). yt-dlp
+    /// needs to be told where it is (see `downloadAudio`), because a GUI app
+    /// launched from Finder has a minimal PATH that doesn't include Homebrew.
+    private static func preferredFFmpegPaths() -> [String] {
         [
             "/opt/homebrew/bin/ffmpeg",
             "/usr/local/bin/ffmpeg",
-            "/usr/bin/ffmpeg",
-            bundled
-        ].compactMap { $0 }
+            "/usr/bin/ffmpeg"
+        ]
     }
 
     /// The directory containing ffmpeg (and ffprobe) to hand to yt-dlp via
@@ -264,7 +256,7 @@ public enum YouTubeAudioImportService {
     private static func resolveFFmpegDirectory() -> String? {
         guard let ffmpegPath = findExecutablePath(
             named: "ffmpeg",
-            preferredPaths: preferredFFmpegPaths(bundled: bundledExecutablePath(named: "ffmpeg")),
+            preferredPaths: preferredFFmpegPaths(),
             environment: ProcessInfo.processInfo.environment
         ) else {
             return nil
@@ -550,11 +542,9 @@ public enum YouTubeAudioImportService {
     }
 
     private static func resolveYTDLPExecutable() -> (executable: URL, prefixArguments: [String]) {
-        let bundledYTDLP = bundledExecutablePath(named: "yt-dlp")
-
         if let path = findExecutablePath(
             named: "yt-dlp",
-            preferredPaths: preferredYTDLPPaths(bundled: bundledYTDLP),
+            preferredPaths: preferredYTDLPPaths(),
             environment: ProcessInfo.processInfo.environment
         ) {
             return (URL(fileURLWithPath: path), [])
@@ -610,16 +600,7 @@ public enum YouTubeAudioImportService {
         if fileManager.isExecutableFile(atPath: managedURL.path) { return }
 
         try fileManager.createDirectory(at: managedURL.deletingLastPathComponent(), withIntermediateDirectories: true)
-
-        if let bundled = bundledExecutablePath(named: "yt-dlp") {
-            // Seed from the bundled snapshot; the self-update below freshens it.
-            if fileManager.fileExists(atPath: managedURL.path) {
-                try fileManager.removeItem(at: managedURL)
-            }
-            try fileManager.copyItem(at: URL(fileURLWithPath: bundled), to: managedURL)
-        } else {
-            try downloadLatestYTDLP(to: managedURL)
-        }
+        try downloadLatestYTDLP(to: managedURL)
 
         try fileManager.setAttributes([.posixPermissions: 0o755], ofItemAtPath: managedURL.path)
         clearQuarantine(at: managedURL)
@@ -684,27 +665,6 @@ public enum YouTubeAudioImportService {
                 if fileManager.isExecutableFile(atPath: candidate) {
                     return candidate
                 }
-            }
-        }
-
-        return nil
-    }
-
-    private static func bundledExecutablePath(named name: String) -> String? {
-        let fileManager = FileManager.default
-        let bundle = Bundle.main
-        let candidates: [URL?] = [
-            bundle.resourceURL?.appendingPathComponent("bin/\(name)", isDirectory: false),
-            bundle.bundleURL
-                .appendingPathComponent("Contents", isDirectory: true)
-                .appendingPathComponent("Resources", isDirectory: true)
-                .appendingPathComponent("bin", isDirectory: true)
-                .appendingPathComponent(name, isDirectory: false)
-        ]
-
-        for candidate in candidates.compactMap({ $0 }) {
-            if fileManager.isExecutableFile(atPath: candidate.path) {
-                return candidate.path
             }
         }
 

@@ -32,8 +32,8 @@ public enum HomebrewMaintenanceService {
         }
 
         guard let brewPath = resolveBrewPath() else {
-            // No Homebrew: nothing to maintain. The managed yt-dlp copy and the
-            // bundled tools still cover the app.
+            // No Homebrew: nothing to maintain here. The self-updating managed
+            // yt-dlp copy still covers YouTube downloads as a fallback.
             return false
         }
 
@@ -55,6 +55,22 @@ public enum HomebrewMaintenanceService {
             return candidate
         }
         return nil
+    }
+
+    /// The managed formulae that Homebrew reports as having a newer version
+    /// available. Empty when Homebrew isn't installed or everything is current.
+    public static func outdatedManagedFormulae() -> [String] {
+        guard let brewPath = resolveBrewPath() else { return [] }
+        guard let output = runBrewCapturingOutput(brewPath, ["outdated", "--formula", "--quiet"]) else {
+            return []
+        }
+        let outdated = Set(
+            output
+                .split(whereSeparator: \.isNewline)
+                .map { $0.trimmingCharacters(in: .whitespaces) }
+                .filter { !$0.isEmpty }
+        )
+        return managedFormulae.filter { outdated.contains($0) }
     }
 
     private static func isFormulaInstalled(_ brewPath: String, _ formula: String) -> Bool {
@@ -79,6 +95,27 @@ public enum HomebrewMaintenanceService {
         }
         process.waitUntilExit()
         return process.terminationStatus
+    }
+
+    /// Runs a brew command with a clean, non-login environment and returns its
+    /// standard output (or nil if it couldn't be launched).
+    private static func runBrewCapturingOutput(_ brewPath: String, _ arguments: [String]) -> String? {
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: brewPath)
+        process.arguments = arguments
+        process.environment = cleanEnvironment(brewPath: brewPath)
+        let stdoutPipe = Pipe()
+        process.standardOutput = stdoutPipe
+        process.standardError = Pipe()
+
+        do {
+            try process.run()
+        } catch {
+            return nil
+        }
+        let data = stdoutPipe.fileHandleForReading.readDataToEndOfFile()
+        process.waitUntilExit()
+        return String(data: data, encoding: .utf8)
     }
 
     private static func cleanEnvironment(brewPath: String) -> [String: String] {
