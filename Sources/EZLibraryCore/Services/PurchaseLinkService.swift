@@ -512,7 +512,7 @@ public enum PurchaseLinkService {
     /// Strips trailing version descriptors from a title: parenthetical/bracket
     /// suffixes like "(Radio Edit)"/"[Extended Mix]" and a dash-separated
     /// trailing descriptor like " - Radio Edit".
-    static func coreTitle(_ name: String) -> String {
+    public static func coreTitle(_ name: String) -> String {
         var value = name.trimmingCharacters(in: .whitespaces)
 
         while let last = value.last, last == ")" || last == "]" {

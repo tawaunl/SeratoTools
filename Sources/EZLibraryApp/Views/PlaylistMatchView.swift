@@ -721,7 +721,9 @@ struct PlaylistMatchView: View {
                         .font(.caption.weight(.semibold))
                         .foregroundStyle(.secondary)
 
-                    ForEach(Array(suggestions.prefix(5))) { suggestion in
+                    ScrollView {
+                        VStack(alignment: .leading, spacing: 6) {
+                    ForEach(suggestions) { suggestion in
                         let isHovered = hoveredSuggestionKey == suggestionRowKey(planID: item.id, suggestionID: suggestion.id)
                         HStack(alignment: .top, spacing: 8) {
                             VStack(alignment: .leading, spacing: 2) {
@@ -777,6 +779,9 @@ struct PlaylistMatchView: View {
                             hoveredSuggestionKey = hovering ? key : (hoveredSuggestionKey == key ? nil : hoveredSuggestionKey)
                         }
                     }
+                        }
+                    }
+                    .frame(maxHeight: 210)
                 }
                 .padding(8)
                 .background(
@@ -824,7 +829,9 @@ struct PlaylistMatchView: View {
                         .font(.caption.weight(.semibold))
                         .foregroundStyle(.secondary)
 
-                    ForEach(Array(suggestions.prefix(5))) { suggestion in
+                    ScrollView {
+                        VStack(alignment: .leading, spacing: 6) {
+                    ForEach(suggestions) { suggestion in
                         let isHovered = hoveredMatchedSuggestionKey == matchedSuggestionRowKey(entryID: entry.id, suggestionID: suggestion.id)
                         HStack(alignment: .top, spacing: 8) {
                             VStack(alignment: .leading, spacing: 2) {
@@ -880,6 +887,9 @@ struct PlaylistMatchView: View {
                             hoveredMatchedSuggestionKey = hovering ? key : (hoveredMatchedSuggestionKey == key ? nil : hoveredMatchedSuggestionKey)
                         }
                     }
+                        }
+                    }
+                    .frame(maxHeight: 210)
                 }
                 .padding(8)
                 .background(
@@ -1499,7 +1509,7 @@ struct PlaylistMatchView: View {
     }
 
     private func searchYouTubeSuggestions(for item: PlaylistMatchService.PlanItem) {
-        let query = [item.entry.artist, item.entry.title]
+        let query = [item.entry.artist, PurchaseLinkService.coreTitle(item.entry.title)]
             .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
             .filter { !$0.isEmpty }
             .joined(separator: " ")
@@ -1510,12 +1520,12 @@ struct PlaylistMatchView: View {
         }
 
         searchingPlanIDs.insert(item.id)
-        planStatusByID[item.id] = "Searching YouTube..."
+        planStatusByID[item.id] = "Searching…"
 
         Task {
             do {
                 let suggestions = try await Task.detached(priority: .userInitiated) {
-                    try YouTubeAudioImportService.searchVideos(query: query, maxResults: 5)
+                    try YouTubeAudioImportService.searchAudioSuggestions(query: query, maxResults: 12)
                 }.value
 
                 youtubeSuggestionsByPlanID[item.id] = suggestions
@@ -1533,7 +1543,7 @@ struct PlaylistMatchView: View {
     }
 
     private func searchYouTubeSuggestions(for entry: PlaylistMatchService.PlaylistEntry) {
-        let query = [entry.artist, entry.title]
+        let query = [entry.artist, PurchaseLinkService.coreTitle(entry.title)]
             .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
             .filter { !$0.isEmpty }
             .joined(separator: " ")
@@ -1544,12 +1554,12 @@ struct PlaylistMatchView: View {
         }
 
         matchedSearchingEntryIDs.insert(entry.id)
-        matchedStatusByEntryID[entry.id] = "Searching YouTube..."
+        matchedStatusByEntryID[entry.id] = "Searching…"
 
         Task {
             do {
                 let suggestions = try await Task.detached(priority: .userInitiated) {
-                    try YouTubeAudioImportService.searchVideos(query: query, maxResults: 5)
+                    try YouTubeAudioImportService.searchAudioSuggestions(query: query, maxResults: 12)
                 }.value
 
                 matchedSuggestionsByEntryID[entry.id] = suggestions
