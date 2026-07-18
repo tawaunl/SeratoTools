@@ -226,7 +226,7 @@ struct PlaylistMatchView: View {
                         .foregroundStyle(.secondary)
                         .overlay(alignment: .topTrailing) {
                             FastHoverHelp(
-                                text: "In Spotify: open the mix → … → Add to Playlist → New Playlist, then paste the new playlist's link here."
+                                text: "In Spotify: open the mix → … → Add to other playlist → New Playlist, then paste the new playlist's link here."
                             )
                             .offset(x: 2, y: -2)
                         }
