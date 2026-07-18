@@ -80,8 +80,6 @@ struct PlaylistMatchView: View {
     @State private var matchedRippingEntryIDs: Set<UUID> = []
     @State private var matchedSuggestionsByEntryID: [UUID: [YouTubeAudioImportService.SearchResult]] = [:]
 
-    @State private var purchaseLinksByPlanID: [UUID: [PurchaseLinkService.PurchaseLink]] = [:]
-    @State private var loadingPurchaseLinkPlanIDs: Set<UUID> = []
     @State private var purchaseLinksByEntryID: [UUID: [PurchaseLinkService.PurchaseLink]] = [:]
     @State private var loadingPurchaseLinkEntryIDs: Set<UUID> = []
     @State private var importingPlanIDs: Set<UUID> = []
@@ -549,10 +547,10 @@ struct PlaylistMatchView: View {
                             .font(.callout.weight(.semibold))
 
                         purchaseLinksSection(
-                            links: purchaseLinksByPlanID[item.id],
-                            isLoading: loadingPurchaseLinkPlanIDs.contains(item.id)
+                            links: purchaseLinksByEntryID[item.entry.id],
+                            isLoading: loadingPurchaseLinkEntryIDs.contains(item.entry.id)
                         )
-                        .onAppear { findPurchaseLinks(forPlan: item) }
+                        .onAppear { findPurchaseLinks(forEntry: item.entry) }
 
                         HStack(spacing: 8) {
                             Button {
@@ -958,8 +956,6 @@ struct PlaylistMatchView: View {
         matchedSearchingEntryIDs = []
         matchedRippingEntryIDs = []
         matchedSuggestionsByEntryID = [:]
-        purchaseLinksByPlanID = [:]
-        loadingPurchaseLinkPlanIDs = []
         purchaseLinksByEntryID = [:]
         loadingPurchaseLinkEntryIDs = []
         successMessage = nil
@@ -1477,27 +1473,10 @@ struct PlaylistMatchView: View {
         return panel.runModal() == .OK ? panel.url : nil
     }
 
-    private func findPurchaseLinks(forPlan item: PlaylistMatchService.PlanItem) {
-        // Auto-triggered on appear — only run once per plan item.
-        guard purchaseLinksByPlanID[item.id] == nil, !loadingPurchaseLinkPlanIDs.contains(item.id) else { return }
-
-        let entry = item.entry
-        guard !PurchaseLinkService.searchQuery(title: entry.title, artist: entry.artist).isEmpty else {
-            purchaseLinksByPlanID[item.id] = []
-            return
-        }
-
-        loadingPurchaseLinkPlanIDs.insert(item.id)
-
-        Task {
-            let links = await PurchaseLinkService.purchaseLinks(title: entry.title, artist: entry.artist)
-            purchaseLinksByPlanID[item.id] = links
-            loadingPurchaseLinkPlanIDs.remove(item.id)
-        }
-    }
-
     private func findPurchaseLinks(forEntry entry: PlaylistMatchService.PlaylistEntry) {
-        // Auto-triggered on appear — only run once per entry.
+        // Auto-triggered on appear — only run once per entry. Keyed by the
+        // stable entry.id (not the ephemeral PlanItem.id) so re-matches after
+        // an import/rip reuse cached results instead of re-hitting the network.
         guard purchaseLinksByEntryID[entry.id] == nil, !loadingPurchaseLinkEntryIDs.contains(entry.id) else { return }
 
         guard !PurchaseLinkService.searchQuery(title: entry.title, artist: entry.artist).isEmpty else {
@@ -1969,7 +1948,8 @@ struct PlaylistMatchView: View {
             youtubeSuggestionsByPlanID: youtubeSuggestionsByPlanID,
             matchedYoutubeURLByEntryID: matchedYoutubeURLByEntryID,
             matchedStatusByEntryID: matchedStatusByEntryID,
-            matchedSuggestionsByEntryID: matchedSuggestionsByEntryID
+            matchedSuggestionsByEntryID: matchedSuggestionsByEntryID,
+            purchaseLinksByEntryID: purchaseLinksByEntryID
         )
     }
 
@@ -1997,6 +1977,7 @@ struct PlaylistMatchView: View {
         matchedYoutubeURLByEntryID = cached.matchedYoutubeURLByEntryID
         matchedStatusByEntryID = cached.matchedStatusByEntryID
         matchedSuggestionsByEntryID = cached.matchedSuggestionsByEntryID
+        purchaseLinksByEntryID = cached.purchaseLinksByEntryID
     }
 
     private func upsertTargetCrateFromCurrentSelection() throws -> URL {
@@ -2242,6 +2223,7 @@ private struct CachedState {
     let matchedYoutubeURLByEntryID: [UUID: String]
     let matchedStatusByEntryID: [UUID: String]
     let matchedSuggestionsByEntryID: [UUID: [YouTubeAudioImportService.SearchResult]]
+    let purchaseLinksByEntryID: [UUID: [PurchaseLinkService.PurchaseLink]]
 }
 
 @MainActor
