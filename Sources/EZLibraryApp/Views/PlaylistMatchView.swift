@@ -634,6 +634,8 @@ struct PlaylistMatchView: View {
     }
 
     private func clearResults() {
+        rawInput = ""
+        crateName = "PlaylistMatch"
         resolvedEntries = []
         resolvedEntryCount = 0
         matchedEntries = []
