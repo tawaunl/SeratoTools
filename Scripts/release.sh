@@ -92,9 +92,9 @@ will warn on first open. To install:
 ## What it installs
 
 - \`SeratoTools.app\` into /Applications
-- Bundled \`yt-dlp\`, \`ffmpeg\`/\`ffprobe\`, and \`fpcalc\` — works offline out of the box
-- On install, best-effort bootstraps Homebrew + \`yt-dlp\` + \`ffmpeg\` + \`chromaprint\`
-  for the logged-in user
+- On install (and on every launch), SeratoTools installs and keeps its
+  command-line tools — \`yt-dlp\`, \`ffmpeg\`/\`ffprobe\`, and \`fpcalc\` —
+  up to date via Homebrew. Nothing is bundled, so the tools always stay current.
 
 ## Checksum (SHA-256)
 

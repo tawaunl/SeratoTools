@@ -48,10 +48,11 @@ fi
 
 # Bootstrap runtime dependencies (Homebrew + yt-dlp + ffmpeg + chromaprint) for
 # the logged-in user. The bundled script re-targets itself from root to the
-# console user and is fully best-effort: the app ships portable copies of these
-# tools, so this only provides/updates system-wide installs and never blocks
-# the installer. It runs detached so a first-time Homebrew install (which can
-# take several minutes and hit the network) does not stall the installer UI.
+# console user and is best-effort. The app no longer bundles these tools, so
+# this pre-installs them at install time; the app also re-checks and installs
+# them on every launch. It runs detached so a first-time Homebrew install
+# (which can take several minutes and hit the network) does not stall the
+# installer UI.
 BOOTSTRAP="$APP_PATH/Contents/Resources/scripts/install-dependencies.sh"
 if [[ -x "$BOOTSTRAP" ]]; then
   log "Launching dependency bootstrap: $BOOTSTRAP"
@@ -83,5 +84,5 @@ pkgbuild "${PKGBUILD_ARGS[@]}" "$PKG_PATH"
 
 echo "Built installer: $PKG_PATH"
 echo "Install with: installer -pkg \"$PKG_PATH\" -target /"
-echo "On install, the pkg bootstraps Homebrew + yt-dlp + ffmpeg + chromaprint for the logged-in user (best effort; the app also bundles portable copies)."
+echo "On install, the pkg bootstraps Homebrew + yt-dlp + ffmpeg + chromaprint for the logged-in user (best effort; the app also re-checks and installs them on every launch)."
 echo "Quick Action setup after install: /Applications/SeratoTools.app/Contents/Resources/scripts/install-finder-quick-action.sh"
