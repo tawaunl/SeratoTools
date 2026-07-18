@@ -108,7 +108,7 @@ public enum AudioFingerprintService {
         var request = URLRequest(url: URL(string: "https://api.acoustid.org/v2/lookup")!)
         request.httpMethod = "POST"
         request.setValue("application/x-www-form-urlencoded; charset=utf-8", forHTTPHeaderField: "Content-Type")
-        request.setValue("SeratoTools/1.0 (audio fingerprint)", forHTTPHeaderField: "User-Agent")
+        request.setValue("EZLibrary/1.0 (audio fingerprint)", forHTTPHeaderField: "User-Agent")
         request.httpBody = components.percentEncodedQuery?.data(using: .utf8)
 
         let (data, response) = try await session.data(for: request)
@@ -155,7 +155,7 @@ public enum AudioFingerprintService {
         var request = URLRequest(url: URL(string: "https://api.acoustid.org/v2/lookup")!)
         request.httpMethod = "POST"
         request.setValue("application/x-www-form-urlencoded; charset=utf-8", forHTTPHeaderField: "Content-Type")
-        request.setValue("SeratoTools/1.0 (audio fingerprint)", forHTTPHeaderField: "User-Agent")
+        request.setValue("EZLibrary/1.0 (audio fingerprint)", forHTTPHeaderField: "User-Agent")
         request.httpBody = components.percentEncodedQuery?.data(using: .utf8)
 
         do {

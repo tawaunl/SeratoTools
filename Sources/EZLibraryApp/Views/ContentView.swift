@@ -840,7 +840,7 @@ private struct DiscogsTokenSettingsSheet: View {
                     SecureField("Paste Discogs token", text: $discogsTokenInput)
                         .textFieldStyle(.roundedBorder)
 
-                    Text("Used for Discogs metadata lookup. Stored in UserDefaults as SeratoToolsDiscogsToken.")
+                    Text("Used for Discogs metadata lookup. Stored securely in the app's settings.")
                         .font(.caption)
                         .foregroundStyle(.secondary)
 
@@ -865,7 +865,7 @@ private struct DiscogsTokenSettingsSheet: View {
                         }
                     }
 
-                    Text("Used for external audio fingerprint recognition. Must be an AcoustID application client key from acoustid.org/new-application. Stored in UserDefaults as SeratoToolsAcoustIDKey.")
+                    Text("Used for external audio fingerprint recognition. Must be an AcoustID application client key from acoustid.org/new-application. Stored securely in the app's settings.")
                         .font(.caption)
                         .foregroundStyle(.secondary)
 

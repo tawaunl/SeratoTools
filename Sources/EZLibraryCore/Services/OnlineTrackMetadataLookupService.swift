@@ -457,7 +457,7 @@ public enum OnlineTrackMetadataLookupService {
 
         guard let url = components?.url else { return [] }
         var request = URLRequest(url: url)
-        request.setValue("SeratoTools/1.0 (metadata lookup)", forHTTPHeaderField: "User-Agent")
+        request.setValue("EZLibrary/1.0 (metadata lookup)", forHTTPHeaderField: "User-Agent")
 
         let (data, _) = try await session.data(for: request)
         let decoded = try JSONDecoder().decode(MusicBrainzResponse.self, from: data)
@@ -530,7 +530,7 @@ public enum OnlineTrackMetadataLookupService {
         guard let url = components?.url else { return [] }
 
         var request = URLRequest(url: url)
-        request.setValue("SeratoTools/1.0 (metadata lookup)", forHTTPHeaderField: "User-Agent")
+        request.setValue("EZLibrary/1.0 (metadata lookup)", forHTTPHeaderField: "User-Agent")
         request.setValue("Discogs token=\(token)", forHTTPHeaderField: "Authorization")
 
         let (data, response) = try await session.data(for: request)
