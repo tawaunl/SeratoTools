@@ -86,6 +86,7 @@ struct PlaylistMatchView: View {
     @State private var purchaseLinksByEntryID: [UUID: [PurchaseLinkService.PurchaseLink]] = [:]
     @State private var loadingPurchaseLinkEntryIDs: Set<UUID> = []
     @State private var importingPlanIDs: Set<UUID> = []
+    @State private var importingEntryIDs: Set<UUID> = []
     @StateObject private var downloadsWatcher = DownloadsFolderWatcher()
     @State private var detectedDownloadMatches: [DownloadMatch] = []
     @State private var downloadTagCache: [URL: AudioFileTagReader.Tags] = [:]
@@ -345,6 +346,28 @@ struct PlaylistMatchView: View {
                                     isLoading: loadingPurchaseLinkEntryIDs.contains(item.entry.id)
                                 )
                                 .onAppear { findPurchaseLinks(forEntry: item.entry) }
+
+                                HStack(spacing: 8) {
+                                    Button {
+                                        importPurchasedFileForMatched(item.entry)
+                                    } label: {
+                                        Label(
+                                            importingEntryIDs.contains(item.entry.id) ? "Importing…" : "I Bought It — Import File…",
+                                            systemImage: "square.and.arrow.down"
+                                        )
+                                    }
+                                    .controlSize(.small)
+                                    .disabled(importingEntryIDs.contains(item.entry.id))
+                                    .help("Pick a version you bought to add it to \(targetCrateName).")
+
+                                    Spacer(minLength: 0)
+                                }
+
+                                if let status = matchedStatusByEntryID[item.entry.id] {
+                                    Text(status)
+                                        .font(.caption)
+                                        .foregroundStyle(.secondary)
+                                }
                             }
 
                             if !includedMatchedEntryIDs.contains(item.entry.id) {
@@ -846,12 +869,6 @@ struct PlaylistMatchView: View {
                         .fill(Color(nsColor: .windowBackgroundColor).opacity(0.5))
                 )
             }
-
-            if let status = matchedStatusByEntryID[entry.id] {
-                Text(status)
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-            }
         }
     }
 
@@ -1291,6 +1308,65 @@ struct PlaylistMatchView: View {
             }
 
             importingPlanIDs.remove(item.id)
+        }
+    }
+
+    /// Imports a purchased file for a matched song: adds the bought version to
+    /// the crate + Serato database and re-matches so it shows up as a version.
+    private func importPurchasedFileForMatched(_ entry: PlaylistMatchService.PlaylistEntry, fileURL: URL? = nil) {
+        guard let selectedURL = fileURL ?? chooseAudioFileFromDownloads() else { return }
+
+        errorMessage = nil
+        successMessage = nil
+        importingEntryIDs.insert(entry.id)
+        matchedStatusByEntryID[entry.id] = "Importing \(selectedURL.lastPathComponent)…"
+
+        let metadata = metadataForPurchasedFile(entry)
+        let destinationFolderURL = centralImportDestinationFolder
+
+        Task {
+            do {
+                let crate = try resolveOrCreateTargetCrate()
+                let rootDirectory = libraryService.rootDirectory
+                let databaseFileURL = libraryService.databaseFile
+
+                let importedURL = try await Task.detached(priority: .userInitiated) { () throws -> URL in
+                    let importResult = try AddMusicImportService.importAudioFiles(
+                        inputURLs: [selectedURL],
+                        destinationFolderURL: destinationFolderURL,
+                        transferMode: .move
+                    )
+                    guard let importedURL = importResult.importedFileURLs.first else {
+                        throw AddMusicImportService.ImportError.noSupportedAudioFiles
+                    }
+
+                    try writeDownloadedTrackToSeratoDatabase(
+                        fileURL: importedURL,
+                        rootDirectory: rootDirectory,
+                        databaseFileURL: databaseFileURL,
+                        metadata: metadata
+                    )
+
+                    _ = try AddMusicImportService.appendAudioFiles(
+                        [importedURL],
+                        toExistingCrate: crate,
+                        rootDirectory: rootDirectory
+                    )
+
+                    return importedURL
+                }.value
+
+                onLibraryChanged()
+                await refreshMatchAfterMatchedRip(entryID: entry.id, downloadedFileURL: importedURL)
+                try? alignTargetCrateToCurrentSelectionOrder()
+                matchedStatusByEntryID[entry.id] = "Imported \(importedURL.lastPathComponent) into \(targetCrateName)."
+                successMessage = "Imported \(importedURL.lastPathComponent) into \(targetCrateName)."
+            } catch {
+                errorMessage = error.localizedDescription
+                matchedStatusByEntryID[entry.id] = "Import failed: \(error.localizedDescription)"
+            }
+
+            importingEntryIDs.remove(entry.id)
         }
     }
 
