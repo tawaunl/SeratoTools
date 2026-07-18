@@ -534,7 +534,9 @@ struct TrackMetadataEditorSheet: View {
         guard !lockedFields.contains(field) else { return }
         switch field {
         case .title:
-            if !value.isEmpty { title = value }
+            if !value.isEmpty {
+                title = OnlineTrackMetadataLookupService.titlePreservingDescriptors(from: value, original: track.title)
+            }
         case .artist:
             if !value.isEmpty { artist = value }
         case .album:
@@ -555,7 +557,9 @@ struct TrackMetadataEditorSheet: View {
 
         switch field {
         case .title:
-            if !candidate.title.isEmpty { title = candidate.title }
+            if !candidate.title.isEmpty {
+                title = OnlineTrackMetadataLookupService.titlePreservingDescriptors(from: candidate.title, original: track.title)
+            }
         case .artist:
             if !candidate.artist.isEmpty { artist = candidate.artist }
         case .album:

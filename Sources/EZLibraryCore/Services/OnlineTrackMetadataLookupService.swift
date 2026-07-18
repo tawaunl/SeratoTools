@@ -356,6 +356,62 @@ public enum OnlineTrackMetadataLookupService {
         return value
     }
 
+    /// DJ version/mix descriptors that should be preserved from the original
+    /// title when applying an online match. Online stores return the plain song
+    /// title (e.g. "Feel So Close"), but DJs rely on the variant marker
+    /// ("(Intro)", "(Clean)", "(Extended)", …) staying on the title.
+    static let djDescriptorKeywords: [String] = [
+        "intro", "outro", "clean", "dirty", "extended", "acapella", "a cappella",
+        "instrumental", "radio", "edit", "remix", "mix", "club", "vip", "bootleg",
+        "rework", "refix", "flip", "mashup", "dub", "short edit", "long edit",
+        "quick hit", "quickie", "transition", "redrum", "hype", "segue", "snippet",
+        "aca in", "aca out", "in out", "starter"
+    ]
+
+    /// Returns `candidateTitle` with any DJ-descriptor parenthetical/bracket
+    /// groups from `originalTitle` preserved. Store matches drop these markers,
+    /// so when the user applies a match we re-attach the original's DJ terms
+    /// (e.g. picking "Feel So Close" for "Feel So Close (Intro)" keeps
+    /// "(Intro)"). Non-DJ parentheticals like "(feat. X)" are left off, and a
+    /// descriptor already present on the candidate isn't duplicated.
+    public static func titlePreservingDescriptors(from candidateTitle: String, original originalTitle: String) -> String {
+        var result = candidateTitle.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !result.isEmpty else { return candidateTitle }
+
+        for group in bracketedGroups(in: originalTitle) where groupContainsDJKeyword(group) {
+            let innerLower = bracketedInner(group).lowercased()
+            if result.lowercased().contains(innerLower) { continue }
+            result += " \(group)"
+        }
+
+        return result
+    }
+
+    /// Returns the `(…)` and `[…]` groups from a title, in order, with brackets.
+    private static func bracketedGroups(in title: String) -> [String] {
+        let pattern = #"[\(\[][^\(\)\[\]]*[\)\]]"#
+        guard let regex = try? NSRegularExpression(pattern: pattern) else { return [] }
+        let range = NSRange(title.startIndex..., in: title)
+        return regex.matches(in: title, options: [], range: range).compactMap { match in
+            Range(match.range, in: title).map { String(title[$0]) }
+        }
+    }
+
+    private static func bracketedInner(_ group: String) -> String {
+        var inner = group
+        if inner.hasPrefix("(") || inner.hasPrefix("[") { inner.removeFirst() }
+        if inner.hasSuffix(")") || inner.hasSuffix("]") { inner.removeLast() }
+        return inner.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    private static func groupContainsDJKeyword(_ group: String) -> Bool {
+        let inner = bracketedInner(group).lowercased()
+        guard !inner.isEmpty else { return false }
+        return djDescriptorKeywords.contains { keyword in
+            inner.range(of: "\\b\(NSRegularExpression.escapedPattern(for: keyword))\\b", options: .regularExpression) != nil
+        }
+    }
+
     private static func removeTrailingDescriptor(from value: inout String) -> Bool {
         let patterns = [#"\s*\([^()]*\)\s*$"#, #"\s*\[[^\[\]]*\]\s*$"#]
 
