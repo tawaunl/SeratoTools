@@ -288,9 +288,9 @@ struct YouTubeRipView: View {
 
     private var heroCard: some View {
         VStack(alignment: .leading, spacing: 8) {
-            Text("YouTube Rip")
+            Text("Download Audio")
                 .font(.system(size: 32, weight: .semibold, design: .default))
-            Text("Paste one or many YouTube links, or import CSV/Excel files of links, then batch download audio into your main music folder and crates.")
+            Text("Paste one or many links from YouTube, SoundCloud, and other supported sites, or import CSV/Excel files of links, then batch download audio into your main music folder and crates.")
                 .foregroundStyle(.secondary)
 
             if let batchProgressMessage {
@@ -386,7 +386,7 @@ struct YouTubeRipView: View {
             }
 
             let linkCount = parsedVideoURLs.count
-            Text("\(linkCount) valid YouTube link\(linkCount == 1 ? "" : "s") detected")
+            Text("\(linkCount) valid link\(linkCount == 1 ? "" : "s") detected")
                 .font(.footnote)
                 .foregroundStyle(.secondary)
 
@@ -472,7 +472,7 @@ struct YouTubeRipView: View {
         VStack(alignment: .leading, spacing: 8) {
             Text("Bulk ID3 Handling")
                 .font(.title3.weight(.semibold))
-            Text("Custom ID3 fields are disabled for multi-link downloads to avoid applying the same tags to the wrong song. Each track uses metadata discovered from YouTube and lookup sources instead.")
+            Text("Custom ID3 fields are disabled for multi-link downloads to avoid applying the same tags to the wrong song. Each track uses metadata discovered from the source site and lookup sources instead.")
                 .foregroundStyle(.secondary)
         }
         .padding(16)

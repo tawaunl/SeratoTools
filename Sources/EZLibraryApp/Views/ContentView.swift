@@ -328,7 +328,7 @@ struct ContentView: View {
             Label("Duplicates", systemImage: "rectangle.on.rectangle").tag(SidebarSection.duplicates)
             Label("PlaylistMatch", systemImage: "music.quarternote.3").tag(SidebarSection.playlistMatch)
             Label("Add Music", systemImage: "plus.square.on.square").tag(SidebarSection.addMusic)
-            Label("YouTube Rip", systemImage: "arrow.down.circle").tag(SidebarSection.youtubeRip)
+            Label("Download Audio", systemImage: "arrow.down.circle").tag(SidebarSection.youtubeRip)
             Label("Crates", systemImage: "square.stack").tag(SidebarSection.crates)
             Label("Tags", systemImage: "tag").tag(SidebarSection.tags)
             Label("Missing Tracks", systemImage: "exclamationmark.triangle").tag(SidebarSection.missingTracks)
