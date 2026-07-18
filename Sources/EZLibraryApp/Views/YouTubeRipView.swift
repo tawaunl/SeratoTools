@@ -278,6 +278,8 @@ struct YouTubeRipView: View {
             }
         }
         .onChange(of: crateAssignmentMode) {
+            successMessage = nil
+            errorMessage = nil
             crateAssignmentModeRaw = crateAssignmentMode.rawValue
         }
         .onChange(of: crateAssignmentMode) {
@@ -593,7 +595,10 @@ struct YouTubeRipView: View {
                 browsePrompt: "Use Folder",
                 browseStartURL: destinationFolderURL,
                 allowsNewFolderCreation: true,
-                onPathChanged: nil
+                onPathChanged: {
+                    successMessage = nil
+                    errorMessage = nil
+                }
             )
 
             HStack(spacing: 10) {

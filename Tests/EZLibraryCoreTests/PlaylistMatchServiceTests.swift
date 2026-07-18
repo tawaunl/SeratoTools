@@ -2,6 +2,34 @@ import Foundation
 import Testing
 @testable import EZLibraryCore
 
+@Test func remixPlaylistEntryMatchesLibraryOriginal() {
+    let library: [Track] = [
+        Track(
+            seratoStoredPath: "Music/Justice - Neverender.mp3",
+            fileURL: URL(fileURLWithPath: "/tmp/Neverender.mp3"),
+            title: "Neverender",
+            artist: "Justice, Tame Impala"
+        )
+    ]
+    let entries: [PlaylistMatchService.PlaylistEntry] = [
+        .init(title: "Neverender - Rampa Remix", artist: "Justice, Tame Impala, Rampa, Keinemusik", sourceLine: "")
+    ]
+    let result = PlaylistMatchService.match(entries: entries, libraryTracks: library)
+    #expect(result.matchedEntries.count == 1)
+    #expect(result.planItems.isEmpty)
+    #expect(result.matchedEntries.first?.primaryTrack.title == "Neverender")
+}
+
+@Test func strippingVersionDescriptorRemovesRemixSuffixes() {
+    #expect(PlaylistMatchService.strippingVersionDescriptor("Neverender - Rampa Remix") == "Neverender")
+    #expect(PlaylistMatchService.strippingVersionDescriptor("Neverender (Rampa Remix)") == "Neverender")
+    #expect(PlaylistMatchService.strippingVersionDescriptor("Feel So Close - Radio Edit") == "Feel So Close")
+    #expect(PlaylistMatchService.strippingVersionDescriptor("Anthem (Extended Mix)") == "Anthem")
+    // Not a version descriptor — keep it.
+    #expect(PlaylistMatchService.strippingVersionDescriptor("Song - Part 2") == "Song - Part 2")
+    #expect(PlaylistMatchService.strippingVersionDescriptor("Alive") == "Alive")
+}
+
 @Test func playlistMatchParsesCSVRows() {
     let input = """
     title,artist
@@ -47,6 +75,82 @@ import Testing
     #expect(result.matchedEntries.first?.reason == .exactTitleAndArtist)
     #expect(result.planItems.count == 1)
     #expect(result.planItems.first?.entry.title == "Turn Off The Lights")
+}
+
+@Test func spotifyPersonalizedMixIsFlagged() {
+    // Personalized "Made For You" mix (37i9dQZF1E… / 37i9dQZEVX…) → warn, and
+    // the note tells the user to save it to a static playlist.
+    let note = PlaylistMatchService.spotifyPersonalizedMixNote(
+        for: "https://open.spotify.com/playlist/37i9dQZF1EIenRw7a52He7?si=a1029acd3c89489e"
+    )
+    #expect(note != nil)
+    #expect(note?.lowercased().contains("static playlist") == true)
+    #expect(PlaylistMatchService.spotifyPersonalizedMixNote(for: "https://open.spotify.com/playlist/37i9dQZEVXcJZ123456789012") != nil)
+    // Editorial playlist (37i9dQZF1DX…) and normal user playlists → no warning.
+    #expect(PlaylistMatchService.spotifyPersonalizedMixNote(for: "https://open.spotify.com/playlist/37i9dQZF1DXcBWIGoYBM5M") == nil)
+    #expect(PlaylistMatchService.spotifyPersonalizedMixNote(for: "https://open.spotify.com/playlist/3cEYpjA9oz9GiPac4AsH4n") == nil)
+    #expect(PlaylistMatchService.spotifyPersonalizedMixNote(for: "not a spotify link") == nil)
+}
+
+@Test func matchDownloadedFileLinksToPlanEntry() {
+    let entries: [PlaylistMatchService.PlaylistEntry] = [
+        .init(title: "Feel So Close", artist: "Calvin Harris", sourceLine: ""),
+        .init(title: "Headlines", artist: "Drake", sourceLine: "")
+    ]
+
+    #expect(
+        PlaylistMatchService.matchDownloadedFile(
+            filename: "Calvin Harris - Feel So Close (Radio Edit).mp3",
+            entries: entries
+        )?.title == "Feel So Close"
+    )
+    #expect(
+        PlaylistMatchService.matchDownloadedFile(
+            filename: "01 Headlines - Drake.m4a",
+            entries: entries
+        )?.title == "Headlines"
+    )
+    #expect(
+        PlaylistMatchService.matchDownloadedFile(
+            filename: "Some Unrelated Track.mp3",
+            entries: entries
+        ) == nil
+    )
+}
+
+@Test func matchDownloadedTrackFallsBackToID3Tags() {
+    let entries: [PlaylistMatchService.PlaylistEntry] = [
+        .init(title: "Feel So Close", artist: "Calvin Harris", sourceLine: ""),
+        .init(title: "Headlines", artist: "Drake", sourceLine: "")
+    ]
+
+    // Filename is useless; ID3 tags resolve the match.
+    #expect(
+        PlaylistMatchService.matchDownloadedTrack(
+            filename: "track_01.mp3",
+            tagTitle: "Feel So Close (Radio Edit)",
+            tagArtist: "Calvin Harris",
+            entries: entries
+        )?.title == "Feel So Close"
+    )
+    // Neither filename nor tags match anything.
+    #expect(
+        PlaylistMatchService.matchDownloadedTrack(
+            filename: "track_02.mp3",
+            tagTitle: "Totally Different Song",
+            tagArtist: "Nobody",
+            entries: entries
+        ) == nil
+    )
+    // Filename still wins when it's conclusive even without tags.
+    #expect(
+        PlaylistMatchService.matchDownloadedTrack(
+            filename: "Drake - Headlines.m4a",
+            tagTitle: nil,
+            tagArtist: nil,
+            entries: entries
+        )?.title == "Headlines"
+    )
 }
 
 @Test func playlistMatchReturnsAllLibraryVersionsForMatchedSong() {

@@ -362,23 +362,6 @@ public enum PlaylistMatchService {
                     }
                     continue
                 }
-
-                if let first = titleCandidates.first?.track {
-                    let versions = libraryVersions(for: entry, selectedTrack: first, in: normalizedTracks)
-                    matchedEntries.append(
-                        MatchedEntry(
-                            entry: entry,
-                            primaryTrack: first,
-                            versions: versions,
-                            reason: .exactTitleOnly,
-                            confidence: .medium
-                        )
-                    )
-                    if matchedIDs.insert(first.id).inserted {
-                        matched.append(first)
-                    }
-                    continue
-                }
             }
 
             if let fuzzy = fuzzyFind(entry: entry, in: normalizedTracks) {
@@ -415,6 +398,82 @@ public enum PlaylistMatchService {
 
         let data = try encoder.encode(payload)
         try AtomicFileWriter.write(data, to: fileURL)
+    }
+
+    /// Best-effort match of a downloaded audio file (by filename) to one of the
+    /// plan entries, so a purchased/downloaded track can be routed to the right
+    /// gap. Matches when the normalized filename contains the entry's
+    /// normalized title and (when present) artist; the most specific match
+    /// wins. Returns `nil` when nothing is confident enough.
+    public static func matchDownloadedFile(filename: String, entries: [PlaylistEntry]) -> PlaylistEntry? {
+        let haystack = normalizedFileStem(filename)
+        guard !haystack.isEmpty else { return nil }
+
+        var best: (entry: PlaylistEntry, score: Int)?
+        for entry in entries {
+            let title = normalizedTitle(entry.title)
+            guard !title.isEmpty, haystack.contains(title) else { continue }
+
+            let artist = normalizedArtist(entry.artist)
+            let artistMatched = !artist.isEmpty && haystack.contains(artist)
+            if !artist.isEmpty && !artistMatched {
+                continue
+            }
+
+            let score = title.count + (artistMatched ? artist.count : 0)
+            if best == nil || score > best!.score {
+                best = (entry, score)
+            }
+        }
+
+        return best?.entry
+    }
+
+    /// Filename → normalized comparison key: drops the extension and applies the
+    /// same normalization used for titles/artists.
+    static func normalizedFileStem(_ filename: String) -> String {
+        let stem = (filename as NSString).deletingPathExtension
+        return normalized(stem)
+    }
+
+    /// Match a downloaded file to a plan entry using the filename first, then
+    /// falling back to the file's ID3/metadata title + artist when the filename
+    /// alone isn't conclusive (e.g. "track01.mp3").
+    public static func matchDownloadedTrack(
+        filename: String,
+        tagTitle: String?,
+        tagArtist: String?,
+        entries: [PlaylistEntry]
+    ) -> PlaylistEntry? {
+        if let byFilename = matchDownloadedFile(filename: filename, entries: entries) {
+            return byFilename
+        }
+
+        let title = normalizedTitle(tagTitle ?? "")
+        guard !title.isEmpty else { return nil }
+        let artist = normalizedArtist(tagArtist ?? "")
+
+        var best: (entry: PlaylistEntry, score: Int)?
+        for entry in entries {
+            let entryTitle = normalizedTitle(entry.title)
+            guard !entryTitle.isEmpty else { continue }
+            let titleMatched = entryTitle == title || entryTitle.contains(title) || title.contains(entryTitle)
+            guard titleMatched else { continue }
+
+            let entryArtist = normalizedArtist(entry.artist)
+            let artistMatched = !entryArtist.isEmpty && !artist.isEmpty
+                && (entryArtist.contains(artist) || artist.contains(entryArtist))
+            if !entryArtist.isEmpty && !artist.isEmpty && !artistMatched {
+                continue
+            }
+
+            let score = title.count + (artistMatched ? artist.count : 0)
+            if best == nil || score > best!.score {
+                best = (entry, score)
+            }
+        }
+
+        return best?.entry
     }
 
     public static func loadPlan(from fileURL: URL) throws -> [PlanItem] {
@@ -621,6 +680,21 @@ public enum PlaylistMatchService {
         }
 
         return PlaylistEntry(title: cleaned, artist: "", sourceLine: line)
+    }
+
+    /// Personalized Spotify mixes (Daily Mix, genre/mood "Mixes", Discover
+    /// Weekly, Release Radar, On Repeat) are tailored per user. Without a login
+    /// we can only read Spotify's generic public preview, which won't match a
+    /// signed-in listener's version. Returns a user-facing note in that case.
+    public static func spotifyPersonalizedMixNote(for input: String) -> String? {
+        guard let url = spotifyPlaylistURL(from: input),
+              let id = playlistID(fromSpotifyWebURL: url) else {
+            return nil
+        }
+        guard id.hasPrefix("37i9dQZF1E") || id.hasPrefix("37i9dQZEVX") else {
+            return nil
+        }
+        return "⚠️ This looks like a personalized Spotify mix, so the tracks may differ from what you see in your Spotify app. For exact match, save the mix to a new static playlist in Spotify and paste that playlist's link instead."
     }
 
     public static func spotifyPlaylistURL(from input: String) -> URL? {
@@ -1530,7 +1604,7 @@ public enum PlaylistMatchService {
     }
 
     private static func normalizedTitle(_ value: String) -> String {
-        var result = normalized(value)
+        var result = normalized(strippingVersionDescriptor(value))
         // Remove common "featuring" clauses embedded in titles.
         result = replacingMatches(of: featParenRegex, in: result, with: " ")
         result = replacingMatches(of: featBracketRegex, in: result, with: " ")
@@ -1538,6 +1612,58 @@ public enum PlaylistMatchService {
         result = replacingMatches(of: versionWordsRegex, in: result, with: " ")
         result = replacingMatches(of: whitespaceRunRegex, in: result, with: " ")
         return result.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    /// Version/mix keywords that mark a title suffix as a variant rather than a
+    /// different song.
+    private static let titleVersionKeywords = [
+        "remix", "mix", "edit", "rework", "reedit", "re-edit", "dub", "vip",
+        "bootleg", "flip", "refix", "mashup", "version", "extended", "radio",
+        "instrumental", "acapella", "intro", "outro", "club", "remaster",
+        "remastered", "live", "demo"
+    ]
+
+    private static func containsVersionKeyword(_ text: String) -> Bool {
+        let lower = text.lowercased()
+        return titleVersionKeywords.contains { keyword in
+            lower.range(of: "\\b\(NSRegularExpression.escapedPattern(for: keyword))\\b", options: .regularExpression) != nil
+        }
+    }
+
+    /// Strips a trailing remix/version descriptor from a title so a playlist's
+    /// remix (e.g. "Neverender - Rampa Remix" or "Neverender (Rampa Remix)")
+    /// still matches the library's original "Neverender". Keeps the descriptor
+    /// only when it isn't a recognized version keyword.
+    static func strippingVersionDescriptor(_ title: String) -> String {
+        var working = title.trimmingCharacters(in: .whitespaces)
+
+        // Peel trailing (…)/[…] groups that name a version.
+        var changed = true
+        while changed {
+            changed = false
+            for (open, close): (Character, Character) in [("(", ")"), ("[", "]")] {
+                guard working.hasSuffix(String(close)),
+                      let openIndex = working.lastIndex(of: open),
+                      openIndex < working.index(before: working.endIndex) else {
+                    continue
+                }
+                let inner = String(working[working.index(after: openIndex)..<working.index(before: working.endIndex)])
+                if containsVersionKeyword(inner) {
+                    working = String(working[..<openIndex]).trimmingCharacters(in: .whitespaces)
+                    changed = true
+                }
+            }
+        }
+
+        // Trailing " - <descriptor>" version suffix.
+        if let range = working.range(of: " - ", options: .backwards) {
+            let suffix = String(working[range.upperBound...])
+            if containsVersionKeyword(suffix) {
+                working = String(working[..<range.lowerBound]).trimmingCharacters(in: .whitespaces)
+            }
+        }
+
+        return working.isEmpty ? title.trimmingCharacters(in: .whitespaces) : working
     }
 
     private static func normalizedArtist(_ value: String) -> String {

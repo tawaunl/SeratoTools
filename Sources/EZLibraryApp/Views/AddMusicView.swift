@@ -176,7 +176,10 @@ struct AddMusicView: View {
                 browsePrompt: "Use Folder",
                 browseStartURL: destinationFolderURL,
                 allowsNewFolderCreation: true,
-                onPathChanged: refreshDiscoveredCount
+                onPathChanged: {
+                    clearStatusMessages()
+                    refreshDiscoveredCount()
+                }
             )
 
             HStack(spacing: 10) {
@@ -300,6 +303,7 @@ struct AddMusicView: View {
                 }
                 .help("Choose audio files or folders to import into your library.")
                 Button("Clear") {
+                    clearStatusMessages()
                     selectedInputURLs = []
                     refreshDiscoveredCount()
                 }
@@ -415,6 +419,7 @@ struct AddMusicView: View {
         panel.prompt = "Add"
 
         if panel.runModal() == .OK {
+            clearStatusMessages()
             selectedInputURLs = mergedUniqueURLs(existing: selectedInputURLs, incoming: panel.urls)
             refreshDiscoveredCount()
         }
@@ -434,6 +439,11 @@ struct AddMusicView: View {
         return output.sorted {
             $0.path.localizedStandardCompare($1.path) == .orderedAscending
         }
+    }
+
+    private func clearStatusMessages() {
+        successMessage = nil
+        errorMessage = nil
     }
 
     private func refreshDiscoveredCount() {
@@ -617,7 +627,7 @@ struct AddMusicView: View {
     }
 }
 
-private struct FastHoverHelp: View {
+struct FastHoverHelp: View {
     let text: String
 
     @State private var isHovering = false
@@ -635,7 +645,7 @@ private struct FastHoverHelp: View {
 
                 if hovering {
                     hoverTask = Task { @MainActor in
-                        try? await Task.sleep(nanoseconds: 80_000_000)
+                        try? await Task.sleep(nanoseconds: 40_000_000)
                         guard !Task.isCancelled, isHovering else { return }
                         withAnimation(.easeOut(duration: 0.1)) {
                             showPopover = true

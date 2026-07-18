@@ -7,7 +7,7 @@ This project can now be packaged as a self-contained macOS app + installer packa
 - `EZLibrary.app`
 - `EZLibraryCLI` inside app resources
 - `fpcalc` (required for AcoustID fingerprint lookup)
-- `yt-dlp` and `ffmpeg` when available on the build machine
+- `ffmpeg` when available on the build machine
 - Finder Quick Action helper scripts in app resources
 
 Bundled tools are placed in:
@@ -38,8 +38,7 @@ Runtime tool notes:
 - Without the flag, bundled runtime tools are the build host's native arch. The
   app still launches everywhere because the binaries are universal; on a
   different-arch Mac the installer's Homebrew bootstrap installs arch-correct
-  `yt-dlp`/`ffmpeg`/`fpcalc` at install time (and the YouTube Rip screen's
-  **Install Dependencies** button can do the same on demand).
+  `ffmpeg`/`fpcalc` at install time.
 - With `EZLIBRARY_BUILD_UNIVERSAL=1`, a preflight validates that the bundled
   runtime tools and their dylibs are universal2 and fails early if they are not.
   This requires universal Homebrew dependencies on the build host.
@@ -75,7 +74,7 @@ Installer behavior on target machines:
 
 - Removes quarantine attributes from `/Applications/EZLibrary.app` when present.
 - Bootstraps runtime dependencies for the logged-in user on a fresh machine:
-  installs Homebrew (if missing) plus `yt-dlp`, `ffmpeg`, and `chromaprint`
+  installs Homebrew (if missing) plus `ffmpeg` and `chromaprint`
   (`fpcalc`). This runs best-effort and detached so it never blocks or fails the
   install — the app also ships portable copies of these tools, so it works even
   if the bootstrap can't run.
@@ -91,9 +90,6 @@ Run the dependency bootstrap manually at any time:
 ```bash
 /Applications/EZLibrary.app/Contents/Resources/scripts/install-dependencies.sh
 ```
-
-The YouTube Rip screen also exposes an **Install Dependencies** button that runs
-the same bootstrap on demand when `yt-dlp`/`ffmpeg` are missing.
 
 Install locally for testing:
 
@@ -121,7 +117,6 @@ After installing the app into `/Applications`, install Finder Quick Action:
 
 - `fpcalc` is required and will be installed via Homebrew during build if missing.
 - Runtime now prefers bundled binaries before checking system PATH.
-- `yt-dlp` is bundled as a portable standalone binary.
 - `ffmpeg` and `ffprobe` are bundled along with their non-system dynamic libraries.
 - `fpcalc` is bundled along with its non-system dynamic libraries.
 - Result: shipped app and pkg are self-contained for these runtime dependencies.

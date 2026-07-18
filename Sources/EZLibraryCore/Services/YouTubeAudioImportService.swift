@@ -357,7 +357,50 @@ public enum YouTubeAudioImportService {
         }
 
         let safeCount = max(1, min(maxResults, 15))
-        let searchTerm = "ytsearch\(safeCount):\(trimmedQuery)"
+        return try runSearch(searchTerm: "ytsearch\(safeCount):\(trimmedQuery)", fallbackYouTube: true)
+    }
+
+    /// Searches BOTH YouTube and SoundCloud (yt-dlp can download from either),
+    /// drops results that look like music videos rather than audio, and merges
+    /// the two sources so version variants (Extended Mix, Intro, Remix, …)
+    /// surface. Failures on one source degrade to the other.
+    public static func searchAudioSuggestions(query: String, maxResults: Int = 12) throws -> [SearchResult] {
+        let trimmedQuery = query.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmedQuery.isEmpty else {
+            throw ImportError.emptySearchQuery
+        }
+
+        let perSource = max(1, min(maxResults, 15))
+        let youtube = (try? runSearch(searchTerm: "ytsearch\(perSource):\(trimmedQuery)", fallbackYouTube: true)) ?? []
+        let soundcloud = (try? runSearch(searchTerm: "scsearch\(perSource):\(trimmedQuery)", fallbackYouTube: false)) ?? []
+
+        var seen = Set<String>()
+        var merged: [SearchResult] = []
+        for result in youtube + soundcloud {
+            guard !isLikelyMusicVideo(title: result.title) else { continue }
+            guard seen.insert(result.webpageURL.absoluteString.lowercased()).inserted else { continue }
+            merged.append(result)
+        }
+        return merged
+    }
+
+    /// Heuristic: titles that advertise a music/official video (rather than an
+    /// audio upload) are excluded from download suggestions.
+    static func isLikelyMusicVideo(title: String) -> Bool {
+        let lower = title.lowercased()
+        let markers = [
+            "official video",
+            "official music video",
+            "music video",
+            "(video)",
+            "[video]",
+            "official mv",
+            "m/v",
+        ]
+        return markers.contains { lower.contains($0) }
+    }
+
+    private static func runSearch(searchTerm: String, fallbackYouTube: Bool) throws -> [SearchResult] {
         let args = [
             "--flat-playlist",
             "--dump-json",
@@ -405,8 +448,12 @@ public enum YouTubeAudioImportService {
                let parsed = URL(string: pageURLString),
                !pageURLString.isEmpty {
                 webpageURL = parsed
-            } else {
+            } else if fallbackYouTube {
                 webpageURL = URL(string: "https://www.youtube.com/watch?v=\(videoID)")!
+            } else {
+                // No usable page URL (e.g. a SoundCloud entry) — skip it rather
+                // than fabricate a YouTube link.
+                continue
             }
 
             let thumbnailURL: URL?

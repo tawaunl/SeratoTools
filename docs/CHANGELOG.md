@@ -18,14 +18,12 @@ version (`CFBundleShortVersionString.CFBundleVersion`) and are used verbatim by
 ## 0.1.0.5
 
 ### Dependencies now managed by Homebrew
-- EZLibrary no longer bundles `yt-dlp`, `ffmpeg`/`ffprobe`, or `fpcalc`.
+- EZLibrary no longer bundles `ffmpeg`/`ffprobe` or `fpcalc`.
   These command-line tools are now installed and kept up to date through
-  Homebrew, so they never go stale as YouTube and the audio tools change.
+  Homebrew, so they never go stale as the audio tools change.
 - **Every launch checks that the tools are installed and current.** When
   something is missing or an update is available, a banner appears at the top
   of the window with a one-click **Install / Update** button.
-- If Homebrew isn't installed, a self-updating copy of `yt-dlp` is maintained
-  automatically so YouTube downloads keep working.
 
 ## 0.1.0.4
 

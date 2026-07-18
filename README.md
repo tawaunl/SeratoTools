@@ -40,7 +40,7 @@ From broken file paths to crate organization to bulk metadata cleanup, EZLibrary
 - Paste Spotify playlist URLs, CSV rows, or plain text track lists
 - Match against your Serato collection with confidence scoring and version selection
 - Create crates from confirmed matches
-- Keep unresolved entries in a Plan queue and resolve with YouTube-assisted flows
+- Keep unresolved entries in a Plan queue for later resolution
 
 ### Add Music
 
@@ -48,13 +48,6 @@ From broken file paths to crate organization to bulk metadata cleanup, EZLibrary
 - Move or copy mode based on your workflow
 - Auto-discover supported audio formats recursively
 - Create a dated crate, target an existing crate, or import without crate assignment
-
-### YouTube Rip
-
-- Process one or many links in a single batch
-- Download audio with yt-dlp and ffmpeg integration
-- Route output into crates and your main music location
-- Control format, quality, bitrate, and metadata behavior
 
 ### Crates
 
@@ -161,7 +154,7 @@ EZLibrary is built to reduce risk during library mutation.
 - macOS 13+
 - Apple Silicon or Intel (shipped app is universal2)
 - Swift 6
-- yt-dlp and ffmpeg for YouTube workflows
+- ffmpeg for audio processing
 - fpcalc for audio fingerprint lookup
 - Optional: EZLIBRARY_DISCOGS_TOKEN
 - Optional: EZLIBRARY_ACOUSTID_KEY
@@ -199,7 +192,7 @@ Architecture:
 
 Installer note:
 
-- Runtime dependencies are bundled inside the app (fpcalc, yt-dlp, ffmpeg, ffprobe, plus required non-system dylibs), so target machines do not need Homebrew dependency provisioning. Without `EZLIBRARY_BUILD_UNIVERSAL=1`, the bundled tools are the build host's native architecture; on a different-arch Mac the installer's Homebrew bootstrap installs arch-correct copies at install time.
+- Runtime dependencies are bundled inside the app (fpcalc, ffmpeg, ffprobe, plus required non-system dylibs), so target machines do not need Homebrew dependency provisioning. Without `EZLIBRARY_BUILD_UNIVERSAL=1`, the bundled tools are the build host's native architecture; on a different-arch Mac the installer's Homebrew bootstrap installs arch-correct copies at install time.
 
 ## Project Layout
 

@@ -298,6 +298,13 @@ struct LibraryBackupView: View {
     private func refreshPreview() {
         previewTask?.cancel()
 
+        // Clear any stale success/error banner from a previous run whenever the
+        // user reconfigures the backup (destination, mode, or crate). This is only
+        // triggered by input changes and view appearance — never after a completed
+        // backup — so it will not wipe a fresh success confirmation.
+        successMessage = nil
+        errorMessage = nil
+
         let destination = destinationURL
         let mode = selectedMode
         let crateSelection = selectedCrateID

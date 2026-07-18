@@ -31,6 +31,8 @@ struct ContentView: View {
     }
 
     private static let confirmDeleteActionsDefaultsKey = "SeratoToolsConfirmTrackDeleteActions"
+    private static let recentLibraryFoldersDefaultsKey = "SeratoToolsRecentLibraryFolders"
+    private static let recentCentralFoldersDefaultsKey = "SeratoToolsRecentCentralFolders"
 
     private let sidebarWidth: CGFloat = 220
     private let middlePaneWidth: CGFloat = 320
@@ -62,6 +64,7 @@ struct ContentView: View {
     @State private var audioActivationToken = 0
     @State private var filteredLibraryTracks: [Track] = []
     @AppStorage(Self.confirmDeleteActionsDefaultsKey) private var confirmDeleteActions = true
+    @AppStorage(SeratoFeatureFlags.mainMusicFolderDefaultsKey) private var centralMusicFolderPath = ""
 
     private var totalCratesCount: Int {
         libraryService.crates.count
@@ -69,6 +72,32 @@ struct ContentView: View {
 
     private var totalTracksInCratesCount: Int {
         libraryService.tracksInCratesCount
+    }
+
+    private var centralMusicFolderStartURL: URL {
+        let trimmed = centralMusicFolderPath.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !trimmed.isEmpty {
+            return URL(fileURLWithPath: trimmed, isDirectory: true)
+        }
+        return FileManager.default.homeDirectoryForCurrentUser
+            .appendingPathComponent("Music", isDirectory: true)
+    }
+
+    private var centralMusicFolderSuggestions: [String] {
+        var suggestions: [String] = []
+        let central = centralMusicFolderPath.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !central.isEmpty {
+            suggestions.append(central)
+        }
+        suggestions.append(
+            FileManager.default.homeDirectoryForCurrentUser
+                .appendingPathComponent("Music", isDirectory: true).path
+        )
+        let root = libraryService.rootDirectory.standardizedFileURL
+        if root.path != "/" {
+            suggestions.append(root.appendingPathComponent("Music", isDirectory: true).path)
+        }
+        return suggestions
     }
 
     private var smartCratesCount: Int {
@@ -344,12 +373,13 @@ struct ContentView: View {
         case .tracks:
             VStack(alignment: .leading, spacing: 8) {
                 HStack(spacing: 8) {
-                    FinderFolderControls(
+                    FolderDropdownControl(
                         label: "Library directory",
                         path: $libraryPathDraft,
+                        recentsKey: Self.recentLibraryFoldersDefaultsKey,
                         browsePrompt: "Use Library",
                         browseStartURL: URL(fileURLWithPath: libraryPathDraft.isEmpty ? libraryService.libraryDirectory.path : libraryPathDraft),
-                        allowsNewFolderCreation: false,
+                        suggestedPaths: [libraryService.libraryDirectory.path],
                         onPathChanged: applyLibraryDirectory
                     )
                     Button("Apply") { applyLibraryDirectory() }
@@ -358,6 +388,7 @@ struct ContentView: View {
                         .help("Re-read tracks and crates from the current library directory.")
                     Button("API Keys…") { showDiscogsTokenSheet = true }
                         .help("Manage Discogs and AcoustID API keys used for online metadata lookups.")
+                    Spacer(minLength: 0)
                 }
                 .padding(.horizontal, 8)
                 .padding(.top, 8)
@@ -366,6 +397,23 @@ struct ContentView: View {
                     .font(.caption)
                     .foregroundStyle(.secondary)
                     .padding(.horizontal, 8)
+
+                VStack(alignment: .leading, spacing: 4) {
+                    FolderDropdownControl(
+                        label: "Central music folder",
+                        path: $centralMusicFolderPath,
+                        recentsKey: Self.recentCentralFoldersDefaultsKey,
+                        browsePrompt: "Use Folder",
+                        browseStartURL: centralMusicFolderStartURL,
+                        suggestedPaths: centralMusicFolderSuggestions,
+                        onPathChanged: {}
+                    )
+
+                    Text("The folder your library is consolidated into. New downloads and imported/purchased tracks are moved here automatically.")
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                }
+                .padding(.horizontal, 8)
 
                 SectionHeaderCard(
                     title: "Tracks",
