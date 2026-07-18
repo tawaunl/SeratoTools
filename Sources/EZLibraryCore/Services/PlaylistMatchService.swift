@@ -1604,7 +1604,7 @@ public enum PlaylistMatchService {
     }
 
     private static func normalizedTitle(_ value: String) -> String {
-        var result = normalized(value)
+        var result = normalized(strippingVersionDescriptor(value))
         // Remove common "featuring" clauses embedded in titles.
         result = replacingMatches(of: featParenRegex, in: result, with: " ")
         result = replacingMatches(of: featBracketRegex, in: result, with: " ")
@@ -1612,6 +1612,58 @@ public enum PlaylistMatchService {
         result = replacingMatches(of: versionWordsRegex, in: result, with: " ")
         result = replacingMatches(of: whitespaceRunRegex, in: result, with: " ")
         return result.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    /// Version/mix keywords that mark a title suffix as a variant rather than a
+    /// different song.
+    private static let titleVersionKeywords = [
+        "remix", "mix", "edit", "rework", "reedit", "re-edit", "dub", "vip",
+        "bootleg", "flip", "refix", "mashup", "version", "extended", "radio",
+        "instrumental", "acapella", "intro", "outro", "club", "remaster",
+        "remastered", "live", "demo"
+    ]
+
+    private static func containsVersionKeyword(_ text: String) -> Bool {
+        let lower = text.lowercased()
+        return titleVersionKeywords.contains { keyword in
+            lower.range(of: "\\b\(NSRegularExpression.escapedPattern(for: keyword))\\b", options: .regularExpression) != nil
+        }
+    }
+
+    /// Strips a trailing remix/version descriptor from a title so a playlist's
+    /// remix (e.g. "Neverender - Rampa Remix" or "Neverender (Rampa Remix)")
+    /// still matches the library's original "Neverender". Keeps the descriptor
+    /// only when it isn't a recognized version keyword.
+    static func strippingVersionDescriptor(_ title: String) -> String {
+        var working = title.trimmingCharacters(in: .whitespaces)
+
+        // Peel trailing (…)/[…] groups that name a version.
+        var changed = true
+        while changed {
+            changed = false
+            for (open, close): (Character, Character) in [("(", ")"), ("[", "]")] {
+                guard working.hasSuffix(String(close)),
+                      let openIndex = working.lastIndex(of: open),
+                      openIndex < working.index(before: working.endIndex) else {
+                    continue
+                }
+                let inner = String(working[working.index(after: openIndex)..<working.index(before: working.endIndex)])
+                if containsVersionKeyword(inner) {
+                    working = String(working[..<openIndex]).trimmingCharacters(in: .whitespaces)
+                    changed = true
+                }
+            }
+        }
+
+        // Trailing " - <descriptor>" version suffix.
+        if let range = working.range(of: " - ", options: .backwards) {
+            let suffix = String(working[range.upperBound...])
+            if containsVersionKeyword(suffix) {
+                working = String(working[..<range.lowerBound]).trimmingCharacters(in: .whitespaces)
+            }
+        }
+
+        return working.isEmpty ? title.trimmingCharacters(in: .whitespaces) : working
     }
 
     private static func normalizedArtist(_ value: String) -> String {

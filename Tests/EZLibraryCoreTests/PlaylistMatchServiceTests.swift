@@ -2,6 +2,34 @@ import Foundation
 import Testing
 @testable import EZLibraryCore
 
+@Test func remixPlaylistEntryMatchesLibraryOriginal() {
+    let library: [Track] = [
+        Track(
+            seratoStoredPath: "Music/Justice - Neverender.mp3",
+            fileURL: URL(fileURLWithPath: "/tmp/Neverender.mp3"),
+            title: "Neverender",
+            artist: "Justice, Tame Impala"
+        )
+    ]
+    let entries: [PlaylistMatchService.PlaylistEntry] = [
+        .init(title: "Neverender - Rampa Remix", artist: "Justice, Tame Impala, Rampa, Keinemusik", sourceLine: "")
+    ]
+    let result = PlaylistMatchService.match(entries: entries, libraryTracks: library)
+    #expect(result.matchedEntries.count == 1)
+    #expect(result.planItems.isEmpty)
+    #expect(result.matchedEntries.first?.primaryTrack.title == "Neverender")
+}
+
+@Test func strippingVersionDescriptorRemovesRemixSuffixes() {
+    #expect(PlaylistMatchService.strippingVersionDescriptor("Neverender - Rampa Remix") == "Neverender")
+    #expect(PlaylistMatchService.strippingVersionDescriptor("Neverender (Rampa Remix)") == "Neverender")
+    #expect(PlaylistMatchService.strippingVersionDescriptor("Feel So Close - Radio Edit") == "Feel So Close")
+    #expect(PlaylistMatchService.strippingVersionDescriptor("Anthem (Extended Mix)") == "Anthem")
+    // Not a version descriptor — keep it.
+    #expect(PlaylistMatchService.strippingVersionDescriptor("Song - Part 2") == "Song - Part 2")
+    #expect(PlaylistMatchService.strippingVersionDescriptor("Alive") == "Alive")
+}
+
 @Test func playlistMatchParsesCSVRows() {
     let input = """
     title,artist
