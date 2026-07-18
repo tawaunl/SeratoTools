@@ -58,6 +58,7 @@ struct PlaylistMatchView: View {
     @State private var isRunning = false
     @State private var isCreatingCrate = false
     @State private var successMessage: String?
+    @State private var warningMessage: String?
     @State private var errorMessage: String?
     @State private var resolvedEntries: [PlaylistMatchService.PlaylistEntry] = []
     @State private var matchedEntries: [PlaylistMatchService.MatchedEntry] = []
@@ -213,6 +214,12 @@ struct PlaylistMatchView: View {
                 Text(successMessage)
                     .font(.callout.weight(.semibold))
                     .foregroundStyle(.green)
+            }
+
+            if let warningMessage {
+                Text(warningMessage)
+                    .font(.callout)
+                    .foregroundStyle(.orange)
             }
 
             if let errorMessage {
@@ -952,6 +959,7 @@ struct PlaylistMatchView: View {
         purchaseLinksByEntryID = [:]
         loadingPurchaseLinkEntryIDs = []
         successMessage = nil
+        warningMessage = nil
         errorMessage = nil
     }
 
@@ -977,6 +985,7 @@ struct PlaylistMatchView: View {
     private func runMatch() {
         isRunning = true
         successMessage = nil
+        warningMessage = nil
         errorMessage = nil
 
         let input = rawInput
@@ -1019,6 +1028,7 @@ struct PlaylistMatchView: View {
                     message += " Source had \(resolved.totalEntriesFound) tracks; limited to the first \(PlaylistMatchService.maxPlaylistEntries)."
                 }
                 successMessage = message
+                warningMessage = PlaylistMatchService.spotifyPersonalizedMixNote(for: input)
             } catch {
                 errorMessage = error.localizedDescription
             }

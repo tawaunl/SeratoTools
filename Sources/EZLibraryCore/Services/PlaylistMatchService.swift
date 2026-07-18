@@ -682,6 +682,21 @@ public enum PlaylistMatchService {
         return PlaylistEntry(title: cleaned, artist: "", sourceLine: line)
     }
 
+    /// Personalized Spotify mixes (Daily Mix, genre/mood "Mixes", Discover
+    /// Weekly, Release Radar, On Repeat) are tailored per user. Without a login
+    /// we can only read Spotify's generic public preview, which won't match a
+    /// signed-in listener's version. Returns a user-facing note in that case.
+    public static func spotifyPersonalizedMixNote(for input: String) -> String? {
+        guard let url = spotifyPlaylistURL(from: input),
+              let id = playlistID(fromSpotifyWebURL: url) else {
+            return nil
+        }
+        guard id.hasPrefix("37i9dQZF1E") || id.hasPrefix("37i9dQZEVX") else {
+            return nil
+        }
+        return "⚠️ This looks like a personalized Spotify mix, so the tracks may differ from what you see in your Spotify app. For exact match, save the mix to a new static playlist in Spotify and paste that playlist's link instead."
+    }
+
     public static func spotifyPlaylistURL(from input: String) -> URL? {
         if let id = playlistID(fromSpotifyURI: input) {
             return canonicalSpotifyPlaylistURL(for: id)

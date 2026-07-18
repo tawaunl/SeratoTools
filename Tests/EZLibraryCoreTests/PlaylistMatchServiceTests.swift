@@ -49,6 +49,21 @@ import Testing
     #expect(result.planItems.first?.entry.title == "Turn Off The Lights")
 }
 
+@Test func spotifyPersonalizedMixIsFlagged() {
+    // Personalized "Made For You" mix (37i9dQZF1E… / 37i9dQZEVX…) → warn, and
+    // the note tells the user to save it to a static playlist.
+    let note = PlaylistMatchService.spotifyPersonalizedMixNote(
+        for: "https://open.spotify.com/playlist/37i9dQZF1EIenRw7a52He7?si=a1029acd3c89489e"
+    )
+    #expect(note != nil)
+    #expect(note?.lowercased().contains("static playlist") == true)
+    #expect(PlaylistMatchService.spotifyPersonalizedMixNote(for: "https://open.spotify.com/playlist/37i9dQZEVXcJZ123456789012") != nil)
+    // Editorial playlist (37i9dQZF1DX…) and normal user playlists → no warning.
+    #expect(PlaylistMatchService.spotifyPersonalizedMixNote(for: "https://open.spotify.com/playlist/37i9dQZF1DXcBWIGoYBM5M") == nil)
+    #expect(PlaylistMatchService.spotifyPersonalizedMixNote(for: "https://open.spotify.com/playlist/3cEYpjA9oz9GiPac4AsH4n") == nil)
+    #expect(PlaylistMatchService.spotifyPersonalizedMixNote(for: "not a spotify link") == nil)
+}
+
 @Test func matchDownloadedFileLinksToPlanEntry() {
     let entries: [PlaylistMatchService.PlaylistEntry] = [
         .init(title: "Feel So Close", artist: "Calvin Harris", sourceLine: ""),
