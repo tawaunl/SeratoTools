@@ -9,12 +9,9 @@ Before deep debugging, verify these basics:
 1. Confirm you are on macOS 14 or newer.
 2. Run `swift --version` and ensure Swift 6 is available.
 3. Build once from repo root with `swift build`.
-4. If using YouTube features, verify dependencies:
-   - `command -v yt-dlp`
-   - `command -v ffmpeg`
-5. If using fingerprint lookup, verify:
+4. If using fingerprint lookup, verify:
    - `command -v fpcalc`
-6. Confirm your Serato library path is valid (`database V2` exists in `_Serato_`).
+5. Confirm your Serato library path is valid (`database V2` exists in `_Serato_`).
 
 ## Build and Launch
 
@@ -103,15 +100,7 @@ A: Supported formats are:
 
 - `mp3`, `m4a`, `aac`, `wav`, `aif`, `aiff`, `flac`, `alac`, `ogg`
 
-## YouTube and Metadata Features
-
-## Q: YouTube Rip says dependencies are missing.
-
-A: Install required binaries and retry.
-
-- Required: `yt-dlp` and `ffmpeg`
-- If Homebrew is installed:
-  - `brew install yt-dlp ffmpeg`
+## Metadata Features
 
 ## Q: Fingerprint lookup is unavailable.
 
@@ -135,7 +124,6 @@ A: Configure Discogs token.
 A: Make sure required tools are available.
 
 - `fpcalc` and `ffmpeg` are required on the build machine and may be installed via Homebrew during build.
-- `yt-dlp` portable binary is downloaded during build.
 
 ## Q: Universal build mode fails saying a dependency is not universal2.
 
@@ -149,7 +137,7 @@ A: Universal mode validates architecture slices for bundled runtime tools and dy
 
 A: No. The app is packaged with required runtime dependencies already bundled.
 
-- Bundled: `fpcalc`, `yt-dlp`, `ffmpeg`, `ffprobe`
+- Bundled: `fpcalc`, `ffmpeg`, `ffprobe`
 - Bundled: required non-system dynamic libraries for these tools
 - Target machine does not need Homebrew to run these features
 

@@ -81,6 +81,11 @@ struct PlaylistMatchView: View {
     @State private var matchedSuggestionsByEntryID: [UUID: [YouTubeAudioImportService.SearchResult]] = [:]
     @State private var hoveredMatchedSuggestionKey: String?
 
+    @State private var purchaseLinksByPlanID: [UUID: [PurchaseLinkService.PurchaseLink]] = [:]
+    @State private var loadingPurchaseLinkPlanIDs: Set<UUID> = []
+    @State private var purchaseLinksByEntryID: [UUID: [PurchaseLinkService.PurchaseLink]] = [:]
+    @State private var loadingPurchaseLinkEntryIDs: Set<UUID> = []
+
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 14) {
@@ -312,9 +317,15 @@ struct PlaylistMatchView: View {
 
                             if !includedMatchedEntryIDs.contains(item.entry.id) {
                                 VStack(alignment: .leading, spacing: 8) {
-                                    Text("Unchecked match: search and link a YouTube source if you want to add a new rip instead.")
+                                    Text("Unchecked match: buy a proper copy below, or link a YouTube source if you want to add a new rip instead.")
                                         .font(.caption)
                                         .foregroundStyle(.secondary)
+
+                                    purchaseLinksSection(
+                                        links: purchaseLinksByEntryID[item.entry.id],
+                                        isLoading: loadingPurchaseLinkEntryIDs.contains(item.entry.id)
+                                    )
+                                    .onAppear { findPurchaseLinks(forEntry: item.entry) }
 
                                     HStack(spacing: 8) {
                                         TextField(
@@ -480,7 +491,7 @@ struct PlaylistMatchView: View {
                     .font(.footnote)
                     .foregroundStyle(.secondary)
 
-                Text("Use Search YouTube to find a source, paste the video link, then Rip + Add to bring it into this crate.")
+                Text("Buy the track first — we check iTunes and Beatport and only show a store when it actually has the song. Fall back to a YouTube rip only if you can't purchase it.")
                     .font(.footnote)
                     .foregroundStyle(.secondary)
 
@@ -490,109 +501,18 @@ struct PlaylistMatchView: View {
                         Text("• \(artist) - \(item.entry.title)")
                             .font(.callout.weight(.semibold))
 
-                        HStack(spacing: 8) {
-                            TextField(
-                                "Paste YouTube URL",
-                                text: Binding(
-                                    get: { youtubeURLByPlanID[item.id] ?? "" },
-                                    set: { youtubeURLByPlanID[item.id] = $0 }
-                                )
-                            )
-                            .textFieldStyle(.roundedBorder)
+                        purchaseLinksSection(
+                            links: purchaseLinksByPlanID[item.id],
+                            isLoading: loadingPurchaseLinkPlanIDs.contains(item.id)
+                        )
+                        .onAppear { findPurchaseLinks(forPlan: item) }
 
-                            Button(searchingPlanIDs.contains(item.id) ? "Finding..." : "Find In-App") {
-                                searchYouTubeSuggestions(for: item)
-                            }
-                            .disabled(searchingPlanIDs.contains(item.id))
-                            .help("Search YouTube inside the app and list matching results below.")
-
-                            Button("Search YouTube") {
-                                openYouTubeSearch(for: item.entry)
-                            }
-                            .help("Open a YouTube search for this track in your browser.")
-
-                            Button(rippingPlanIDs.contains(item.id) ? "Ripping..." : "Rip + Add") {
-                                ripPlanItemFromYouTube(item)
-                            }
-                            .disabled(rippingPlanIDs.contains(item.id))
-                            .help("Download the audio from the pasted YouTube URL and add it to your library.")
+                        DisclosureGroup("Can't buy it? Download from YouTube") {
+                            youtubePlanControls(for: item)
+                                .padding(.top, 6)
                         }
-
-                        if let suggestions = youtubeSuggestionsByPlanID[item.id], !suggestions.isEmpty {
-                            VStack(alignment: .leading, spacing: 6) {
-                                Text("Suggestions")
-                                    .font(.caption.weight(.semibold))
-                                    .foregroundStyle(.secondary)
-
-                                ForEach(Array(suggestions.prefix(5))) { suggestion in
-                                    let isHovered = hoveredSuggestionKey == suggestionRowKey(planID: item.id, suggestionID: suggestion.id)
-                                    HStack(alignment: .top, spacing: 8) {
-                                        VStack(alignment: .leading, spacing: 2) {
-                                            Text(suggestion.title)
-                                                .font(.caption)
-                                                .lineLimit(1)
-                                            Text(suggestion.channel)
-                                                .font(.caption2)
-                                                .foregroundStyle(.secondary)
-                                        }
-
-                                        Spacer(minLength: 0)
-
-                                        HStack(spacing: 6) {
-                                            Button("Use Link") {
-                                                youtubeURLByPlanID[item.id] = suggestion.webpageURL.absoluteString
-                                            }
-                                            .buttonStyle(.bordered)
-                                            .controlSize(.small)
-                                            .help("Use this suggestion's URL in the field above.")
-
-                                            Button(rippingPlanIDs.contains(item.id) ? "Ripping..." : "Use + Rip") {
-                                                ripPlanItemFromYouTube(item, preferredURL: suggestion.webpageURL)
-                                            }
-                                            .buttonStyle(.borderedProminent)
-                                            .controlSize(.small)
-                                            .disabled(rippingPlanIDs.contains(item.id))
-                                            .help("Download this suggestion's audio and add it to your library.")
-                                        }
-                                        .padding(.horizontal, 6)
-                                        .padding(.vertical, 5)
-                                        .background(
-                                            RoundedRectangle(cornerRadius: 8)
-                                                .fill(Color(nsColor: .windowBackgroundColor).opacity(0.9))
-                                        )
-                                        .overlay(
-                                            RoundedRectangle(cornerRadius: 8)
-                                                .stroke(Color.secondary.opacity(0.2), lineWidth: 1)
-                                        )
-                                    }
-                                    .padding(.horizontal, 8)
-                                    .padding(.vertical, 7)
-                                    .background(
-                                        RoundedRectangle(cornerRadius: 8)
-                                            .fill(Color.accentColor.opacity(isHovered ? 0.18 : 0.08))
-                                    )
-                                    .overlay(
-                                        RoundedRectangle(cornerRadius: 8)
-                                            .stroke(Color.accentColor.opacity(isHovered ? 0.42 : 0.22), lineWidth: 1)
-                                    )
-                                    .onHover { hovering in
-                                        let key = suggestionRowKey(planID: item.id, suggestionID: suggestion.id)
-                                        hoveredSuggestionKey = hovering ? key : (hoveredSuggestionKey == key ? nil : hoveredSuggestionKey)
-                                    }
-                                }
-                            }
-                            .padding(8)
-                            .background(
-                                RoundedRectangle(cornerRadius: 8)
-                                    .fill(Color(nsColor: .windowBackgroundColor).opacity(0.5))
-                            )
-                        }
-
-                        if let status = planStatusByID[item.id] {
-                            Text(status)
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
-                        }
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(.secondary)
                     }
                     .padding(10)
                     .background(
@@ -609,6 +529,198 @@ struct PlaylistMatchView: View {
         }
         .padding(16)
         .background(RoundedRectangle(cornerRadius: 12).fill(Color(nsColor: .controlBackgroundColor).opacity(0.55)))
+    }
+
+    @ViewBuilder
+    private func purchaseLinksSection(
+        links: [PurchaseLinkService.PurchaseLink]?,
+        isLoading: Bool
+    ) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            if isLoading, links == nil {
+                HStack(spacing: 8) {
+                    ProgressView()
+                        .controlSize(.small)
+                    Text("Finding purchase links…")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+            }
+
+            if let links, !links.isEmpty {
+                let grouped = Dictionary(grouping: links, by: { $0.store })
+                let stores = PurchaseLinkService.Store.allCases.filter { grouped[$0]?.isEmpty == false }
+                HStack(spacing: 8) {
+                    Text("Buy:")
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(.secondary)
+                    ForEach(stores, id: \.self) { store in
+                        purchaseStoreControl(store: store, links: grouped[store] ?? [])
+                    }
+                    Spacer(minLength: 0)
+                }
+            } else if let links, links.isEmpty, !isLoading {
+                Text("Couldn't find this track for sale on iTunes or Beatport.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    /// One control per store. When the store carries several versions
+    /// (Extended, Radio Edit, Dirty, Intro, …) they collapse into a single
+    /// menu so the user picks the version instead of seeing a box per version.
+    @ViewBuilder
+    private func purchaseStoreControl(
+        store: PurchaseLinkService.Store,
+        links: [PurchaseLinkService.PurchaseLink]
+    ) -> some View {
+        if links.count <= 1, let link = links.first {
+            Button {
+                NSWorkspace.shared.open(link.url)
+            } label: {
+                if let price = link.priceText, !price.isEmpty {
+                    Label("Buy on \(store.displayName) — \(price)", systemImage: "cart")
+                } else {
+                    Label("Buy on \(store.displayName)", systemImage: "cart")
+                }
+            }
+            .buttonStyle(.bordered)
+            .controlSize(.small)
+            .help("Open \(store.displayName): \(purchaseMenuLabel(for: link))")
+        } else {
+            Menu {
+                ForEach(links) { link in
+                    Button(purchaseMenuLabel(for: link)) {
+                        NSWorkspace.shared.open(link.url)
+                    }
+                }
+            } label: {
+                Label("Buy on \(store.displayName) (\(links.count))", systemImage: "cart")
+            }
+            .menuStyle(.button)
+            .buttonStyle(.bordered)
+            .controlSize(.small)
+            .fixedSize()
+            .help("Pick a version to buy on \(store.displayName).")
+        }
+    }
+
+    private func purchaseMenuLabel(for link: PurchaseLinkService.PurchaseLink) -> String {
+        if let price = link.priceText, !price.isEmpty {
+            return "\(link.versionLabel) — \(price)"
+        }
+        return link.versionLabel
+    }
+
+    @ViewBuilder
+    private func youtubePlanControls(for item: PlaylistMatchService.PlanItem) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(spacing: 8) {
+                TextField(
+                    "Paste YouTube URL",
+                    text: Binding(
+                        get: { youtubeURLByPlanID[item.id] ?? "" },
+                        set: { youtubeURLByPlanID[item.id] = $0 }
+                    )
+                )
+                .textFieldStyle(.roundedBorder)
+
+                Button(searchingPlanIDs.contains(item.id) ? "Finding..." : "Find In-App") {
+                    searchYouTubeSuggestions(for: item)
+                }
+                .disabled(searchingPlanIDs.contains(item.id))
+                .help("Search YouTube inside the app and list matching results below.")
+
+                Button("Search YouTube") {
+                    openYouTubeSearch(for: item.entry)
+                }
+                .help("Open a YouTube search for this track in your browser.")
+
+                Button(rippingPlanIDs.contains(item.id) ? "Ripping..." : "Rip + Add") {
+                    ripPlanItemFromYouTube(item)
+                }
+                .disabled(rippingPlanIDs.contains(item.id))
+                .help("Download the audio from the pasted YouTube URL and add it to your library.")
+            }
+
+            if let suggestions = youtubeSuggestionsByPlanID[item.id], !suggestions.isEmpty {
+                VStack(alignment: .leading, spacing: 6) {
+                    Text("Suggestions")
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(.secondary)
+
+                    ForEach(Array(suggestions.prefix(5))) { suggestion in
+                        let isHovered = hoveredSuggestionKey == suggestionRowKey(planID: item.id, suggestionID: suggestion.id)
+                        HStack(alignment: .top, spacing: 8) {
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(suggestion.title)
+                                    .font(.caption)
+                                    .lineLimit(1)
+                                Text(suggestion.channel)
+                                    .font(.caption2)
+                                    .foregroundStyle(.secondary)
+                            }
+
+                            Spacer(minLength: 0)
+
+                            HStack(spacing: 6) {
+                                Button("Use Link") {
+                                    youtubeURLByPlanID[item.id] = suggestion.webpageURL.absoluteString
+                                }
+                                .buttonStyle(.bordered)
+                                .controlSize(.small)
+                                .help("Use this suggestion's URL in the field above.")
+
+                                Button(rippingPlanIDs.contains(item.id) ? "Ripping..." : "Use + Rip") {
+                                    ripPlanItemFromYouTube(item, preferredURL: suggestion.webpageURL)
+                                }
+                                .buttonStyle(.borderedProminent)
+                                .controlSize(.small)
+                                .disabled(rippingPlanIDs.contains(item.id))
+                                .help("Download this suggestion's audio and add it to your library.")
+                            }
+                            .padding(.horizontal, 6)
+                            .padding(.vertical, 5)
+                            .background(
+                                RoundedRectangle(cornerRadius: 8)
+                                    .fill(Color(nsColor: .windowBackgroundColor).opacity(0.9))
+                            )
+                            .overlay(
+                                RoundedRectangle(cornerRadius: 8)
+                                    .stroke(Color.secondary.opacity(0.2), lineWidth: 1)
+                            )
+                        }
+                        .padding(.horizontal, 8)
+                        .padding(.vertical, 7)
+                        .background(
+                            RoundedRectangle(cornerRadius: 8)
+                                .fill(Color.accentColor.opacity(isHovered ? 0.18 : 0.08))
+                        )
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 8)
+                                .stroke(Color.accentColor.opacity(isHovered ? 0.42 : 0.22), lineWidth: 1)
+                        )
+                        .onHover { hovering in
+                            let key = suggestionRowKey(planID: item.id, suggestionID: suggestion.id)
+                            hoveredSuggestionKey = hovering ? key : (hoveredSuggestionKey == key ? nil : hoveredSuggestionKey)
+                        }
+                    }
+                }
+                .padding(8)
+                .background(
+                    RoundedRectangle(cornerRadius: 8)
+                        .fill(Color(nsColor: .windowBackgroundColor).opacity(0.5))
+                )
+            }
+
+            if let status = planStatusByID[item.id] {
+                Text(status)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+        }
     }
 
     private func statTag(title: String, value: String, accent: Bool = false) -> some View {
@@ -658,6 +770,10 @@ struct PlaylistMatchView: View {
         matchedRippingEntryIDs = []
         matchedSuggestionsByEntryID = [:]
         hoveredMatchedSuggestionKey = nil
+        purchaseLinksByPlanID = [:]
+        loadingPurchaseLinkPlanIDs = []
+        purchaseLinksByEntryID = [:]
+        loadingPurchaseLinkEntryIDs = []
         successMessage = nil
         errorMessage = nil
     }
@@ -983,6 +1099,43 @@ struct PlaylistMatchView: View {
         components.queryItems = [URLQueryItem(name: "search_query", value: query)]
         guard let searchURL = components.url else { return }
         NSWorkspace.shared.open(searchURL)
+    }
+
+    private func findPurchaseLinks(forPlan item: PlaylistMatchService.PlanItem) {
+        // Auto-triggered on appear — only run once per plan item.
+        guard purchaseLinksByPlanID[item.id] == nil, !loadingPurchaseLinkPlanIDs.contains(item.id) else { return }
+
+        let entry = item.entry
+        guard !PurchaseLinkService.searchQuery(title: entry.title, artist: entry.artist).isEmpty else {
+            purchaseLinksByPlanID[item.id] = []
+            return
+        }
+
+        loadingPurchaseLinkPlanIDs.insert(item.id)
+
+        Task {
+            let links = await PurchaseLinkService.purchaseLinks(title: entry.title, artist: entry.artist)
+            purchaseLinksByPlanID[item.id] = links
+            loadingPurchaseLinkPlanIDs.remove(item.id)
+        }
+    }
+
+    private func findPurchaseLinks(forEntry entry: PlaylistMatchService.PlaylistEntry) {
+        // Auto-triggered on appear — only run once per entry.
+        guard purchaseLinksByEntryID[entry.id] == nil, !loadingPurchaseLinkEntryIDs.contains(entry.id) else { return }
+
+        guard !PurchaseLinkService.searchQuery(title: entry.title, artist: entry.artist).isEmpty else {
+            purchaseLinksByEntryID[entry.id] = []
+            return
+        }
+
+        loadingPurchaseLinkEntryIDs.insert(entry.id)
+
+        Task {
+            let links = await PurchaseLinkService.purchaseLinks(title: entry.title, artist: entry.artist)
+            purchaseLinksByEntryID[entry.id] = links
+            loadingPurchaseLinkEntryIDs.remove(entry.id)
+        }
     }
 
     private func searchYouTubeSuggestions(for item: PlaylistMatchService.PlanItem) {
