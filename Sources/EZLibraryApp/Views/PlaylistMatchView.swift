@@ -335,17 +335,23 @@ struct PlaylistMatchView: View {
                             .pickerStyle(.menu)
                             .frame(maxWidth: 440, alignment: .leading)
 
+                            VStack(alignment: .leading, spacing: 4) {
+                                Text("Other versions to buy:")
+                                    .font(.caption.weight(.semibold))
+                                    .foregroundStyle(.secondary)
+
+                                purchaseLinksSection(
+                                    links: purchaseLinksByEntryID[item.entry.id],
+                                    isLoading: loadingPurchaseLinkEntryIDs.contains(item.entry.id)
+                                )
+                                .onAppear { findPurchaseLinks(forEntry: item.entry) }
+                            }
+
                             if !includedMatchedEntryIDs.contains(item.entry.id) {
                                 VStack(alignment: .leading, spacing: 8) {
-                                    Text("Unchecked match: buy a proper copy below, or link a YouTube source if you want to add a new rip instead.")
+                                    Text("Unchecked match: buy a version above, or link a YouTube source if you want to add a new rip instead.")
                                         .font(.caption)
                                         .foregroundStyle(.secondary)
-
-                                    purchaseLinksSection(
-                                        links: purchaseLinksByEntryID[item.entry.id],
-                                        isLoading: loadingPurchaseLinkEntryIDs.contains(item.entry.id)
-                                    )
-                                    .onAppear { findPurchaseLinks(forEntry: item.entry) }
 
                                     HStack(spacing: 8) {
                                         TextField(
