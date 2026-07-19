@@ -1,7 +1,7 @@
 import SwiftUI
 import EZLibraryCore
 
-struct TagsBulkEditView: View {
+struct TracksAndTagsView: View {
     private enum CompletionTrend {
         case aboveBaseline
         case belowBaseline
@@ -48,7 +48,11 @@ struct TagsBulkEditView: View {
     let onApplyMetadata: (Track, SeratoTrackMetadataUpdate) throws -> Void
     let onApplyMetadataBatch: (([(Track, SeratoTrackMetadataUpdate)]) throws -> Void)?
     let onTrackActivated: ((Track, [Track]) -> Void)?
+    let onDeleteRequested: ([Track]) -> Void
+    let onDeleteFromLibrary: ([Track]) -> Void
+    let onDeleteFromComputer: ([Track]) -> Void
 
+    @AppStorage("SeratoToolsConfirmTrackDeleteActions") private var confirmDeleteActions = true
     @State private var selectedScopeID: String = Self.allTracksID
     @State private var selectedTracks: [Track] = []
     @State private var metadataLookupTrack: Track?
@@ -162,9 +166,9 @@ struct TagsBulkEditView: View {
     var body: some View {
         VStack(spacing: 0) {
             SectionHeaderCard(
-                title: "Tags",
-                description: "Bulk-fill missing artist, album, genre, and year metadata across the scope you choose, then apply lookup results track by track.",
-                icon: "tag"
+                title: "Tracks & Tags",
+                description: "Browse every track, pick a crate scope, and bulk-fill missing artist, album, genre, and year metadata, then apply lookup results or delete tracks track by track.",
+                icon: "music.note.list"
             )
 
             HSplitView {
@@ -180,6 +184,9 @@ struct TagsBulkEditView: View {
                     TrackTableView(
                         tracks: displayedTracks,
                         numberingMode: .listOrder,
+                        onDeleteRequested: { selected in
+                            onDeleteRequested(selected)
+                        },
                         onMetadataEditRequested: { track, metadata in
                             do {
                                 try onApplyMetadata(track, metadata)
@@ -242,7 +249,7 @@ struct TagsBulkEditView: View {
 
     private var crateListPane: some View {
         VStack(spacing: 8) {
-            TextField("Search tags scope", text: $searchText)
+            TextField("Search tracks & scope", text: $searchText)
                 .textFieldStyle(.roundedBorder)
                 .padding(.horizontal, 8)
                 .padding(.top, 8)
@@ -382,6 +389,26 @@ struct TagsBulkEditView: View {
                 Toggle("Only Fill Empty", isOn: $onlyFillEmpty)
                     .toggleStyle(.switch)
                     .controlSize(.small)
+            }
+
+            HStack(spacing: 8) {
+                Button("Delete From Library") {
+                    onDeleteFromLibrary(selectedTracks)
+                }
+                .disabled(selectedTracks.isEmpty)
+                .help("Remove the selected tracks from the Serato library. Files stay on disk.")
+
+                Button("Delete From Computer") {
+                    onDeleteFromComputer(selectedTracks)
+                }
+                .disabled(selectedTracks.isEmpty)
+                .help("Remove the selected tracks from the library and move their files to the Trash.")
+
+                Toggle("Confirm Deletes", isOn: $confirmDeleteActions)
+                    .toggleStyle(.switch)
+                    .controlSize(.small)
+                    .help("When off, the delete buttons execute immediately.")
+                Spacer(minLength: 0)
             }
 
             if let bulkLookupMessage {

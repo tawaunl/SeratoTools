@@ -9,7 +9,6 @@ enum SidebarSection: Hashable {
     case addMusic
     case youtubeRip
     case crates
-    case tags
     case missingTracks
     case backup
     case libraryConsolidation
@@ -51,9 +50,6 @@ struct ContentView: View {
     @State private var showTrackDeleteDialog = false
     @State private var trackDeleteErrorMessage: String?
     @State private var crateListFilterMode: CrateListFilterMode = .all
-    @State private var selectedTracksForActions: [Track] = []
-    @State private var metadataLookupTrack: Track?
-    @State private var selectedTrackGenreFilter: String?
     @State private var quickTrackDeleteAction: QuickTrackDeleteAction?
     @State private var showQuickTrackDeleteConfirmation = false
     @State private var showDiscogsTokenSheet = false
@@ -62,7 +58,6 @@ struct ContentView: View {
     @State private var activeAudioTrack: Track?
     @State private var activeAudioTrackList: [Track] = []
     @State private var audioActivationToken = 0
-    @State private var filteredLibraryTracks: [Track] = []
     @AppStorage(Self.confirmDeleteActionsDefaultsKey) private var confirmDeleteActions = true
     @AppStorage(SeratoFeatureFlags.mainMusicFolderDefaultsKey) private var centralMusicFolderPath = ""
 
@@ -108,18 +103,6 @@ struct ContentView: View {
         Set((crateHierarchy.hiddenNodes + smartCrateHierarchy.hiddenNodes).map(\.id)).count
     }
 
-    private var totalTrackCount: Int {
-        libraryService.tracks.count
-    }
-
-    private func updateFilteredLibraryTracks() {
-        guard let selectedTrackGenreFilter else {
-            filteredLibraryTracks = libraryService.tracks
-            return
-        }
-        filteredLibraryTracks = libraryService.tracks.filter { $0.genre == selectedTrackGenreFilter }
-    }
-
     var body: some View {
         Group {
             VStack(spacing: 0) {
@@ -154,12 +137,6 @@ struct ContentView: View {
         .onChange(of: selectedSection) {
             resetTransientFilters()
         }
-        .onChange(of: libraryService.tracks) {
-            updateFilteredLibraryTracks()
-        }
-        .onChange(of: selectedTrackGenreFilter) {
-            updateFilteredLibraryTracks()
-        }
         .onChange(of: selectedCrateNode?.id) {
             if selectedSection == .crates {
                 crateListFilterMode = .all
@@ -167,11 +144,6 @@ struct ContentView: View {
         }
         .onReceive(NotificationCenter.default.publisher(for: NSApplication.willResignActiveNotification)) { _ in
             resetTransientFilters()
-        }
-        .sheet(item: $metadataLookupTrack) { track in
-            TrackMetadataEditorSheet(track: track) { metadata in
-                try saveTrackMetadataEdit(track: track, metadata: metadata)
-            }
         }
         .sheet(isPresented: $showDiscogsTokenSheet) {
             DiscogsTokenSettingsSheet()
@@ -353,13 +325,12 @@ struct ContentView: View {
 
     private var sidebar: some View {
         List(selection: $selectedSection) {
-            Label("Tracks", systemImage: "music.note.list").tag(SidebarSection.tracks)
+            Label("Tracks & Tags", systemImage: "music.note.list").tag(SidebarSection.tracks)
             Label("Duplicates", systemImage: "rectangle.on.rectangle").tag(SidebarSection.duplicates)
             Label("PlaylistMatch", systemImage: "music.quarternote.3").tag(SidebarSection.playlistMatch)
             Label("Add Music", systemImage: "plus.square.on.square").tag(SidebarSection.addMusic)
             Label("Download Audio", systemImage: "arrow.down.circle").tag(SidebarSection.youtubeRip)
             Label("Crates", systemImage: "square.stack").tag(SidebarSection.crates)
-            Label("Tags", systemImage: "tag").tag(SidebarSection.tags)
             Label("Missing Tracks", systemImage: "exclamationmark.triangle").tag(SidebarSection.missingTracks)
             Label("Backup", systemImage: "externaldrive.badge.plus").tag(SidebarSection.backup)
             Label("Library Consolidation", systemImage: "arrow.triangle.merge").tag(SidebarSection.libraryConsolidation)
@@ -415,118 +386,34 @@ struct ContentView: View {
                 }
                 .padding(.horizontal, 8)
 
-                SectionHeaderCard(
-                    title: "Tracks",
-                    description: "Browse every track in the library, filter by genre, and manage metadata or deletion actions from one place.",
-                    icon: "music.note.list"
-                )
-
-                VStack(alignment: .leading, spacing: 8) {
-                    Text(tracksLoadStatus().text)
-                        .font(.callout)
-                        .foregroundStyle(tracksLoadStatus().color)
-                        .padding(.horizontal, 8)
-                        .padding(.top, 8)
-
-                    VStack(alignment: .leading, spacing: 8) {
-                        HStack(spacing: 10) {
-                            crateStatTag(title: "Tracks", value: totalTrackCount, isActive: selectedTrackGenreFilter == nil) {
-                                selectedTrackGenreFilter = nil
-                            }
-                            crateStatTag(title: "Artists", value: libraryService.totalArtistCount)
-                            crateStatTag(title: "Genres", value: libraryService.trackGenres.count)
-                            Spacer(minLength: 0)
-                        }
-
-                        if !libraryService.trackGenres.isEmpty {
-                            ScrollView(.horizontal, showsIndicators: false) {
-                                HStack(spacing: 6) {
-                                    Button("All") {
-                                        selectedTrackGenreFilter = nil
-                                    }
-                                    .buttonStyle(.plain)
-                                    .padding(.horizontal, 10)
-                                    .padding(.vertical, 4)
-                                    .background(
-                                        Capsule().fill(selectedTrackGenreFilter == nil ? Color.accentColor.opacity(0.92) : Color(nsColor: .windowBackgroundColor))
-                                    )
-                                    .overlay(
-                                        Capsule().stroke(selectedTrackGenreFilter == nil ? Color.accentColor : Color.secondary.opacity(0.25), lineWidth: 1)
-                                    )
-                                    .foregroundStyle(selectedTrackGenreFilter == nil ? .white : .primary)
-
-                                    ForEach(libraryService.trackGenres, id: \.self) { genre in
-                                        Button(genre) {
-                                            selectedTrackGenreFilter = selectedTrackGenreFilter == genre ? nil : genre
-                                        }
-                                        .buttonStyle(.plain)
-                                        .padding(.horizontal, 10)
-                                        .padding(.vertical, 4)
-                                        .background(
-                                            Capsule().fill(selectedTrackGenreFilter == genre ? Color.accentColor.opacity(0.92) : Color(nsColor: .windowBackgroundColor))
-                                        )
-                                        .overlay(
-                                            Capsule().stroke(selectedTrackGenreFilter == genre ? Color.accentColor : Color.secondary.opacity(0.25), lineWidth: 1)
-                                        )
-                                        .foregroundStyle(selectedTrackGenreFilter == genre ? .white : .primary)
-                                    }
-                                }
-                                .padding(.horizontal, 8)
-                            }
-                        }
-
-                        HStack {
-                            Button("Lookup ID3 Online") {
-                                metadataLookupTrack = selectedTracksForActions.first
-                            }
-                            .disabled(selectedTracksForActions.count != 1)
-                            .help("Search online sources for metadata for the selected track. Select exactly one track.")
-
-                            Button("Delete From Library") {
-                                pendingTrackDeleteSelection = selectedTracksForActions
-                                performOrConfirmQuickTrackDelete(.fromLibrary)
-                            }
-                            .disabled(selectedTracksForActions.isEmpty)
-                            .help("Remove the selected tracks from the Serato library. Files stay on disk.")
-
-                            Button("Delete From Computer") {
-                                pendingTrackDeleteSelection = selectedTracksForActions
-                                performOrConfirmQuickTrackDelete(.fromComputer)
-                            }
-                            .disabled(selectedTracksForActions.isEmpty)
-                            .help("Remove the selected tracks from the library and move their files to the Trash.")
-
-                            Toggle("Confirm Deletes", isOn: $confirmDeleteActions)
-                                .toggleStyle(.switch)
-                                .controlSize(.small)
-                                .help("When off, top delete buttons execute immediately.")
-                            Spacer()
-                        }
-                        .padding(.horizontal, 8)
-                    }
+                Text(tracksLoadStatus().text)
+                    .font(.callout)
+                    .foregroundStyle(tracksLoadStatus().color)
                     .padding(.horizontal, 8)
-                    .padding(.vertical, 8)
-                    .background(Color(nsColor: .controlBackgroundColor).opacity(0.45))
-                    .glowCardStyle(radius: 8, opacity: 0.05)
 
-                    TrackTableView(
-                        tracks: filteredLibraryTracks,
-                        numberingMode: .listOrder,
-                        onDeleteRequested: { selected in
-                            pendingTrackDeleteSelection = selected
-                            showTrackDeleteDialog = true
-                        },
-                        onMetadataEditRequested: { track, metadata in
-                            applyTrackMetadataEdit(track: track, metadata: metadata)
-                        },
-                        onSelectionChanged: { selected in
-                            selectedTracksForActions = selected
-                        },
-                        onTrackActivated: { track, list in
-                            activateAudioTrack(track, in: list)
-                        }
-                    )
-                }
+                TracksAndTagsView(
+                    onApplyMetadata: { track, metadata in
+                        try saveTrackMetadataEdit(track: track, metadata: metadata)
+                    },
+                    onApplyMetadataBatch: { updates in
+                        try saveTrackMetadataEditsBatch(updates)
+                    },
+                    onTrackActivated: { track, list in
+                        activateAudioTrack(track, in: list)
+                    },
+                    onDeleteRequested: { selected in
+                        pendingTrackDeleteSelection = selected
+                        showTrackDeleteDialog = true
+                    },
+                    onDeleteFromLibrary: { selected in
+                        pendingTrackDeleteSelection = selected
+                        performOrConfirmQuickTrackDelete(.fromLibrary)
+                    },
+                    onDeleteFromComputer: { selected in
+                        pendingTrackDeleteSelection = selected
+                        performOrConfirmQuickTrackDelete(.fromComputer)
+                    }
+                )
             }
         case .duplicates:
             DuplicateTracksView(onLibraryChanged: reloadLibrary)
@@ -536,18 +423,6 @@ struct ContentView: View {
             AddMusicView(onLibraryChanged: reloadLibrary)
         case .youtubeRip:
             YouTubeRipView(onLibraryChanged: reloadLibrary)
-        case .tags:
-            TagsBulkEditView(
-                onApplyMetadata: { track, metadata in
-                    try saveTrackMetadataEdit(track: track, metadata: metadata)
-                },
-                onApplyMetadataBatch: { updates in
-                    try saveTrackMetadataEditsBatch(updates)
-                },
-                onTrackActivated: { track, list in
-                    activateAudioTrack(track, in: list)
-                }
-            )
         case .missingTracks:
             MissingTracksView()
         case .backup:
@@ -644,7 +519,6 @@ struct ContentView: View {
             smartCrateHierarchy.rebuild(from: [])
             selectedCrateNode = nil
         }
-        updateFilteredLibraryTracks()
     }
 
     private func refreshedSelectedCrateNode(previousID: String?) -> CrateNode? {
@@ -681,7 +555,6 @@ struct ContentView: View {
     }
 
     private func resetTransientFilters() {
-        selectedTrackGenreFilter = nil
         crateListFilterMode = .all
     }
 
@@ -752,14 +625,6 @@ struct ContentView: View {
                 let rewrittenPaths = crate.trackPaths.filter { !paths.contains($0) }
                 _ = try SeratoCrateEditor.rewriteTrackPaths(in: crate, to: rewrittenPaths)
             }
-        }
-    }
-
-    private func applyTrackMetadataEdit(track: Track, metadata: SeratoTrackMetadataUpdate) {
-        do {
-            try saveTrackMetadataEdit(track: track, metadata: metadata)
-        } catch {
-            trackDeleteErrorMessage = error.localizedDescription
         }
     }
 

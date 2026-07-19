@@ -79,12 +79,14 @@ struct EZLibraryApp: App {
     var body: some Scene {
         WindowGroup {
             ContentView(crateHierarchy: crateHierarchy, smartCrateHierarchy: smartCrateHierarchy)
+                .textSelection(.enabled)
                 .environmentObject(libraryService)
                 .environmentObject(hiddenCrateStore)
                 .environmentObject(missingTracksService)
                 .environmentObject(dependencyReadiness)
                 .sheet(isPresented: $updateChecker.isPresented) {
                     UpdateCheckView(viewModel: updateChecker)
+                        .textSelection(.enabled)
                 }
                 .task {
                     await updateChecker.runAutomaticCheck()
