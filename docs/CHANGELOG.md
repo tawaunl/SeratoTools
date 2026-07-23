@@ -9,6 +9,26 @@ version (`CFBundleShortVersionString.CFBundleVersion`) and are used verbatim by
 > the highest priority — see [SECURITY.md](../SECURITY.md). This changelog is kept
 > up to date so you can see exactly what changed and when.
 
+## 0.1.0.8
+
+### Built for big libraries
+- **Much faster launch and loading.** Opening EZLibrary and reading your Serato
+  library is dramatically quicker, and the window no longer freezes while it
+  loads — libraries with tens of thousands of tracks now open in a fraction of
+  the time.
+- **No more freezes while you work.** Editing tags, deleting tracks, importing,
+  and switching between sections no longer lock up the interface on large
+  libraries; the heavy work runs in the background and the list updates when
+  it's ready.
+- **Instant search and filtering.** Searching and filtering tracks is far
+  faster, even across very large libraries.
+- **Smoother scrolling** through long track lists.
+
+### Fixes
+- Bulk tag edits now reliably refresh the track list right away.
+- Startup update and dependency checks are deferred a moment so they don't
+  compete with loading your library when the app first opens.
+
 ## 0.1.0.7
 
 ### Tracks & Tags are now one section
