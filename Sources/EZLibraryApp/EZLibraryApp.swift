@@ -114,6 +114,12 @@ struct EZLibraryApp: App {
                     updateChecker.startCheck()
                 }
             }
+            CommandGroup(after: .newItem) {
+                Button("Settings…") {
+                    NotificationCenter.default.post(name: .openEZLibrarySettings, object: nil)
+                }
+                .keyboardShortcut(",", modifiers: .command)
+            }
             CommandGroup(before: .toolbar) {
                 Picker("Appearance", selection: Binding(
                     get: { themeController.current },

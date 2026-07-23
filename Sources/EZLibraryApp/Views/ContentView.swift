@@ -2,6 +2,11 @@ import SwiftUI
 import AppKit
 import EZLibraryCore
 
+extension Notification.Name {
+    /// Posted by the menu-bar "Settings…" command to open the settings sheet.
+    static let openEZLibrarySettings = Notification.Name("openEZLibrarySettings")
+}
+
 enum SidebarSection: Hashable {
     case tracks
     case duplicates
@@ -52,7 +57,7 @@ struct ContentView: View {
     @State private var crateListFilterMode: CrateListFilterMode = .all
     @State private var quickTrackDeleteAction: QuickTrackDeleteAction?
     @State private var showQuickTrackDeleteConfirmation = false
-    @State private var showDiscogsTokenSheet = false
+    @State private var showSettingsSheet = false
     @State private var metadataSaveMessage: String?
     @State private var metadataSaveMessageTask: Task<Void, Never>?
     @State private var activeAudioTrack: Track?
@@ -145,8 +150,11 @@ struct ContentView: View {
         .onReceive(NotificationCenter.default.publisher(for: NSApplication.willResignActiveNotification)) { _ in
             resetTransientFilters()
         }
-        .sheet(isPresented: $showDiscogsTokenSheet) {
-            DiscogsTokenSettingsSheet()
+        .onReceive(NotificationCenter.default.publisher(for: .openEZLibrarySettings)) { _ in
+            showSettingsSheet = true
+        }
+        .sheet(isPresented: $showSettingsSheet) {
+            AppSettingsSheet()
         }
         .confirmationDialog(
             "Delete Selected Tracks",
@@ -308,21 +316,6 @@ struct ContentView: View {
         }
     }
 
-    private func tracksLoadStatus() -> (text: String, color: Color) {
-        if let loadErrorMessage = loadErrorMessage {
-            return ("Library load failed: \(loadErrorMessage)", .red)
-        }
-
-        if libraryService.tracks.isEmpty {
-            return ("No tracks loaded", .secondary)
-        }
-
-        return (
-            "Loaded \(libraryService.tracks.count) tracks, \(libraryService.crates.count) crates, \(libraryService.smartCrates.count) smart crates",
-            .secondary
-        )
-    }
-
     private var sidebar: some View {
         List(selection: $selectedSection) {
             Label("Tracks & Tags", systemImage: "music.note.list").tag(SidebarSection.tracks)
@@ -357,39 +350,31 @@ struct ContentView: View {
                         .help("Load the Serato library from the directory shown above.")
                     Button("Reload") { reloadLibrary() }
                         .help("Re-read tracks and crates from the current library directory.")
-                    Button("API Keys…") { showDiscogsTokenSheet = true }
-                        .help("Manage Discogs and AcoustID API keys used for online metadata lookups.")
+                    Button("Settings…") { showSettingsSheet = true }
+                        .help("Open settings: Discogs/AcoustID API keys, automation options, and more.")
                     Spacer(minLength: 0)
                 }
                 .padding(.horizontal, 8)
                 .padding(.top, 8)
 
-                Text("Using: \(libraryService.libraryDirectory.path)")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .padding(.horizontal, 8)
-
-                VStack(alignment: .leading, spacing: 4) {
-                    FolderDropdownControl(
-                        label: "Central music folder",
-                        path: $centralMusicFolderPath,
-                        recentsKey: Self.recentCentralFoldersDefaultsKey,
-                        browsePrompt: "Use Folder",
-                        browseStartURL: centralMusicFolderStartURL,
-                        suggestedPaths: centralMusicFolderSuggestions,
-                        onPathChanged: {}
-                    )
-
-                    Text("The folder your library is consolidated into. New downloads and imported/purchased tracks are moved here automatically.")
-                        .font(.caption2)
-                        .foregroundStyle(.secondary)
-                }
+                FolderDropdownControl(
+                    label: "Central music folder",
+                    path: $centralMusicFolderPath,
+                    recentsKey: Self.recentCentralFoldersDefaultsKey,
+                    browsePrompt: "Use Folder",
+                    browseStartURL: centralMusicFolderStartURL,
+                    suggestedPaths: centralMusicFolderSuggestions,
+                    onPathChanged: {}
+                )
+                .help("The folder your library is consolidated into. New downloads and imported/purchased tracks are moved here automatically.")
                 .padding(.horizontal, 8)
 
-                Text(tracksLoadStatus().text)
-                    .font(.callout)
-                    .foregroundStyle(tracksLoadStatus().color)
-                    .padding(.horizontal, 8)
+                if let loadErrorMessage {
+                    Text("Library load failed: \(loadErrorMessage)")
+                        .font(.caption)
+                        .foregroundStyle(.red)
+                        .padding(.horizontal, 8)
+                }
 
                 TracksAndTagsView(
                     onApplyMetadata: { track, metadata in
@@ -705,7 +690,7 @@ struct ContentView: View {
     }
 }
 
-private struct DiscogsTokenSettingsSheet: View {
+private struct AppSettingsSheet: View {
     @Environment(\.dismiss) private var dismiss
 
     @State private var discogsTokenInput = ""
@@ -719,6 +704,9 @@ private struct DiscogsTokenSettingsSheet: View {
         VStack(alignment: .leading, spacing: 12) {
             ScrollView {
                 VStack(alignment: .leading, spacing: 12) {
+                    Text("Settings")
+                        .font(.title2.weight(.semibold))
+
                     Text("API Keys")
                         .font(.headline)
 

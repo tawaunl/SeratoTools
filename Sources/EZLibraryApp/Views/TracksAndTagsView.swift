@@ -76,6 +76,7 @@ struct TracksAndTagsView: View {
     @State private var operationErrorMessage: String?
     @State private var pendingTopHitUpdates: [(Track, SeratoTrackMetadataUpdate)] = []
     @State private var showTopHitConfirmation = false
+    @State private var showOnlyFillEmptyPrompt = false
 
     private var regularTree: [CrateNode] {
         CrateHierarchy.build(from: libraryService.crates)
@@ -178,12 +179,6 @@ struct TracksAndTagsView: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            SectionHeaderCard(
-                title: "Tracks & Tags",
-                description: "Browse every track, pick a crate scope, and bulk-fill missing artist, album, genre, and year metadata, then apply lookup results or delete tracks track by track.",
-                icon: "music.note.list"
-            )
-
             HSplitView {
                 crateListPane
                     .frame(minWidth: 260, idealWidth: 280, maxWidth: 320)
@@ -261,6 +256,19 @@ struct TracksAndTagsView: View {
             }
         } message: {
             Text("Top search-hit metadata will be applied for Artist, Album, Genre, and Year on \(pendingTopHitUpdates.count) selected track\(pendingTopHitUpdates.count == 1 ? "" : "s").")
+        }
+        .confirmationDialog(
+            "“Only Fill Empty” is On",
+            isPresented: $showOnlyFillEmptyPrompt,
+            titleVisibility: .visible
+        ) {
+            Button("Turn Off “Only Fill Empty” & Apply") {
+                onlyFillEmpty = false
+                applyBulkMetadata()
+            }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("The selected tracks already have those fields filled, so nothing changed. Uncheck “Only Fill Empty” to overwrite existing values, or turn it off now to apply.")
         }
     }
 
@@ -562,9 +570,11 @@ struct TracksAndTagsView: View {
         }
 
         guard !updates.isEmpty else {
-            bulkLookupMessage = onlyFillEmpty
-                ? "No changes: the selected tracks already have those fields. Turn off \u{201C}Only Fill Empty\u{201D} to overwrite them."
-                : "No changes were needed for the selected tracks."
+            if onlyFillEmpty {
+                showOnlyFillEmptyPrompt = true
+            } else {
+                bulkLookupMessage = "No changes were needed for the selected tracks."
+            }
             return
         }
 
