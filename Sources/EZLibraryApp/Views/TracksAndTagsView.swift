@@ -93,6 +93,10 @@ struct TracksAndTagsView: View {
     /// body evaluation). See `scheduleDerivedRecompute`.
     @State private var derived = Derived()
     @State private var derivedRecomputeTask: Task<Void, Never>?
+    /// Bumped whenever `derived` (and thus the tracks shown in the table) is
+    /// reassigned, so `TrackTableView` can cache its search index and rebuild
+    /// it only on real data changes.
+    @State private var tableTracksVersion = 0
 
     private var regularTree: [CrateNode] {
         CrateHierarchy.build(from: libraryService.crates)
@@ -183,6 +187,7 @@ struct TracksAndTagsView: View {
 
                     TrackTableView(
                         tracks: displayedTracks,
+                        tracksVersion: tableTracksVersion,
                         numberingMode: .listOrder,
                         onDeleteRequested: { selected in
                             onDeleteRequested(selected)
@@ -1014,6 +1019,7 @@ struct TracksAndTagsView: View {
 
             guard !Task.isCancelled else { return }
             derived = result
+            tableTracksVersion &+= 1
         }
     }
 

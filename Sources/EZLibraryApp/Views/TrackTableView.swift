@@ -158,6 +158,7 @@ struct TrackTableView: View {
     /// debounced search text, so `body` needs a single `onChange` instead of a
     /// long modifier chain the type-checker spends seconds on.
     private struct RecomputeKey: Equatable {
+        let version: Int
         let count: Int
         let firstID: UUID?
         let lastID: UUID?
@@ -169,6 +170,7 @@ struct TrackTableView: View {
 
     private var recomputeKey: RecomputeKey {
         RecomputeKey(
+            version: tracksVersion,
             count: tracks.count,
             firstID: tracks.first?.id,
             lastID: tracks.last?.id,
@@ -210,6 +212,9 @@ struct TrackTableView: View {
         let inputSortColumn = sortColumn
         let inputSortAscending = sortAscending
         let inputNumberingMode = numberingMode
+        let inputKey = IndexKey(version: tracksVersion, numberingMode: numberingMode, count: tracks.count)
+        let cachedIndex = indexedTracks
+        let cachedKey = indexedKey
 
         recomputeTask = Task(priority: .userInitiated) {
             if debounce {
@@ -219,6 +224,9 @@ struct TrackTableView: View {
 
             let result = await Self.computeDisplayedTracksAsync(
                 tracks: inputTracks,
+                key: inputKey,
+                cachedIndex: cachedIndex,
+                cachedKey: cachedKey,
                 numberingMode: inputNumberingMode,
                 searchText: inputSearchText,
                 sortColumn: inputSortColumn,
@@ -227,6 +235,8 @@ struct TrackTableView: View {
 
             guard !Task.isCancelled else { return }
             await MainActor.run {
+                indexedTracks = result.index
+                indexedKey = inputKey
                 displayedTracks = result.tracks
                 displayedKeys = result.keys
                 selectedTrackKeys = selectedTrackKeys.intersection(Set(result.keys))
@@ -240,15 +250,21 @@ struct TrackTableView: View {
 
     nonisolated private static func computeDisplayedTracksAsync(
         tracks: [Track],
+        key: IndexKey,
+        cachedIndex: [IndexedTrack],
+        cachedKey: IndexKey?,
         numberingMode: NumberingMode,
         searchText: String,
         sortColumn: SortColumn,
         sortAscending: Bool
-    ) async -> (tracks: [Track], keys: [String]) {
+    ) async -> (index: [IndexedTrack], tracks: [Track], keys: [String]) {
         await withCheckedContinuation { continuation in
             DispatchQueue.global(qos: .userInitiated).async {
                 let result = Self.computeDisplayedTracks(
                     tracks: tracks,
+                    key: key,
+                    cachedIndex: cachedIndex,
+                    cachedKey: cachedKey,
                     numberingMode: numberingMode,
                     searchText: searchText,
                     sortColumn: sortColumn,
@@ -261,24 +277,27 @@ struct TrackTableView: View {
 
     nonisolated private static func computeDisplayedTracks(
         tracks: [Track],
+        key: IndexKey,
+        cachedIndex: [IndexedTrack],
+        cachedKey: IndexKey?,
         numberingMode: NumberingMode,
         searchText: String,
         sortColumn: SortColumn,
         sortAscending: Bool
-    ) -> (tracks: [Track], keys: [String]) {
-        let sourceTracks: [Track]
-        switch numberingMode {
-        case .metadata:
-            sourceTracks = tracks
-        case .listOrder:
-            sourceTracks = tracks.enumerated().map { index, track in
-                var track = track
-                track.trackNumber = index + 1
-                return track
-            }
+    ) -> (index: [IndexedTrack], tracks: [Track], keys: [String]) {
+        // Reuse the prebuilt index when the underlying data hasn't changed
+        // (only search text or sort did); otherwise rebuild it once.
+        let index: [IndexedTrack]
+        if cachedKey == key, cachedIndex.count == tracks.count {
+            index = cachedIndex
+        } else {
+            index = buildIndex(tracks: tracks, numberingMode: numberingMode)
         }
 
-        let filtered = TrackTextSearch.filter(sourceTracks, query: searchText)
+        let needle = TrackTextSearch.needle(for: searchText)
+        let filtered = needle.isEmpty
+            ? index
+            : index.filter { TrackTextSearch.matches(bytes: $0.searchBytes, needle: needle) }
 
         // Descending swaps the operands rather than negating the ascending
         // result: `!ordered` returned `true` for equal elements on both
@@ -286,10 +305,26 @@ struct TrackTableView: View {
         // `sorted(by:)` undefined behavior.
         let sorted = filtered.sorted { lhs, rhs in
             sortAscending
-                ? areInIncreasingOrder(lhs, rhs, by: sortColumn)
-                : areInIncreasingOrder(rhs, lhs, by: sortColumn)
+                ? areInIncreasingOrder(lhs.track, rhs.track, by: sortColumn)
+                : areInIncreasingOrder(rhs.track, lhs.track, by: sortColumn)
         }
-        return (sorted, sorted.map(selectionKey(for:)))
+        return (index, sorted.map(\.track), sorted.map(\.selectionKey))
+    }
+
+    /// Builds the per-track index: applies list-order numbering, then
+    /// precomputes each track's lowercased search bytes and selection key.
+    nonisolated private static func buildIndex(tracks: [Track], numberingMode: NumberingMode) -> [IndexedTrack] {
+        tracks.enumerated().map { index, track in
+            var track = track
+            if numberingMode == .listOrder {
+                track.trackNumber = index + 1
+            }
+            return IndexedTrack(
+                track: track,
+                searchBytes: TrackTextSearch.searchBytes(for: track),
+                selectionKey: selectionKey(for: track)
+            )
+        }
     }
 
     nonisolated private static func areInIncreasingOrder(_ lhs: Track, _ rhs: Track, by sortColumn: SortColumn) -> Bool {

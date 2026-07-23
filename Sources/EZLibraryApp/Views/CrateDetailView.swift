@@ -51,6 +51,10 @@ struct CrateDetailView: View {
     @AppStorage(Self.confirmDeleteActionsDefaultsKey) private var confirmDeleteActions = true
     @State private var selectedGenreFilter: String?
 
+    /// Bumped whenever the tracks the table shows (`content` or the active
+    /// genre filter) change, so `TrackTableView` can cache its search index.
+    @State private var tableTracksVersion = 0
+
     /// Everything derived from `node` + the library that's expensive to
     /// compute: resolving every crate path against a freshly-built library
     /// index. Cached in `@State` and rebuilt only when the node, filter
@@ -90,6 +94,7 @@ struct CrateDetailView: View {
 
                     TrackTableView(
                         tracks: filteredMatchedTracks,
+                        tracksVersion: tableTracksVersion,
                         numberingMode: .listOrder,
                         onDeleteRequested: { selected in
                             pendingDeleteTracks = selected
@@ -154,6 +159,11 @@ struct CrateDetailView: View {
             }
             .onChange(of: node.id) {
                 selectedGenreFilter = nil
+            }
+            .onChange(of: selectedGenreFilter) {
+                // The table shows tracks filtered by genre, so a filter change
+                // is a data change for the table's cached search index.
+                tableTracksVersion &+= 1
             }
             .onChange(of: filterMode) {
                 rebuildContent()
@@ -505,6 +515,7 @@ struct CrateDetailView: View {
         let trackPaths = effectiveTrackPaths(for: node)
         guard let crate = node.crate ?? synthesizedCrateForAggregate(node: node, trackPaths: trackPaths) else {
             content = ResolvedCrateContent()
+            tableTracksVersion &+= 1
             return
         }
 
@@ -526,6 +537,7 @@ struct CrateDetailView: View {
             genreTags: Array(Set(matchedTracks.lazy.map(\.genre).filter { !$0.isEmpty })).sorted(),
             artistCount: Set(matchedTracks.lazy.map(\.artist).filter { !$0.isEmpty }).count
         )
+        tableTracksVersion &+= 1
     }
 
     private func effectiveTrackPaths(for node: CrateNode) -> [String] {

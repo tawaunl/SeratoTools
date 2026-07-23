@@ -268,6 +268,26 @@ timeIt("selectionKey map (string transforms)") {
     }
 }
 
+// Cached-index recompute (what TrackTableView now does): prebuild search bytes
+// + selection key ONCE, then per keystroke filter + sort + extract (keys free).
+struct Indexed { let track: Track; let bytes: [UInt8]; let key: String }
+var indexed: [Indexed] = []
+timeIt("build display index (ONCE per load)") {
+    indexed = tracks.map { t in
+        var s = t.title; s += "\u{01}"; s += t.artist; s += "\u{01}"; s += t.album; s += "\u{01}"; s += t.genre
+        let key = t.seratoStoredPath.replacingOccurrences(of: "\\", with: "/")
+            .trimmingCharacters(in: CharacterSet(charactersIn: "/")).lowercased()
+        return Indexed(track: t, bytes: Array(s.lowercased().utf8), key: key)
+    }
+}
+timeIt("cached recompute: filter+sort+extract/keystroke") {
+    let needle = Array("the".utf8)
+    let filtered = indexed.filter { byteContains($0.bytes, needle) }
+    let sorted = filtered.sorted { $0.track.title.localizedCaseInsensitiveCompare($1.track.title) == .orderedAscending }
+    _ = sorted.map(\.track)
+    _ = sorted.map(\.key)
+}
+
 // TracksAndTagsView per-body cascade: 8 fill-count passes (each O(n) with a
 // per-element trimmingCharacters allocation) + scope/genre/displayed filters.
 // ALL of this currently re-runs on every SwiftUI body evaluation.
