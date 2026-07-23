@@ -143,38 +143,74 @@ enum AppUpdateInstaller {
 
         // $PKG / $APP / $PID are shell variables (not Swift interpolation).
         // The doubled backslashes escape the quotes for the osascript argument.
+        //
+        // The worker logs every step to ~/Library/Logs/EZLibrary-Update.log and
+        // redirects its own stdio there (`exec`) so it never inherits — and then
+        // gets killed by — the terminating app's file descriptors. If the
+        // scripted admin install fails or is cancelled, it opens the package in
+        // the standard macOS Installer so the user is never left stuck.
         let script = """
         #!/bin/bash
         PKG="$1"
         APP="$2"
         PID="$3"
 
-        # Wait (up to ~60s) for EZLibrary to fully quit.
+        LOG="$HOME/Library/Logs/EZLibrary-Update.log"
+        /bin/mkdir -p "$HOME/Library/Logs" 2>/dev/null
+        exec >>"$LOG" 2>&1
+        echo "=== EZLibrary update $(date) pid=$PID ==="
+        echo "pkg=$PKG"
+        echo "app=$APP"
+
+        # Wait (up to ~60s) for EZLibrary to fully quit before replacing it.
         for _ in $(seq 1 120); do
           kill -0 "$PID" 2>/dev/null || break
           sleep 0.5
         done
+        echo "App is no longer running; starting install."
 
-        # Install with a single administrator prompt.
-        /usr/bin/osascript -e "do shell script \\"/usr/sbin/installer -pkg '$PKG' -target /\\" with administrator privileges"
+        if /usr/bin/osascript -e "do shell script \\"/usr/sbin/installer -pkg '$PKG' -target /\\" with administrator privileges"; then
+          echo "Scripted install succeeded."
+        else
+          echo "Scripted install failed or was cancelled; opening the installer UI as a fallback."
+          /usr/bin/open "$PKG"
+        fi
 
         # Reopen the (now updated) app and clean up.
+        echo "Reopening $APP"
         /usr/bin/open "$APP"
         /bin/rm -f "$PKG"
         /bin/rm -f "$0"
+        echo "Update helper finished."
         """
 
         let scriptURL = FileManager.default.temporaryDirectory
-            .appendingPathComponent("seratotools-update-\(UUID().uuidString).sh")
+            .appendingPathComponent("ezlibrary-update-\(UUID().uuidString).sh")
         try script.write(to: scriptURL, atomically: true, encoding: .utf8)
         try FileManager.default.setAttributes(
             [.posixPermissions: 0o755],
             ofItemAtPath: scriptURL.path
         )
 
+        // Launch the worker fully detached: a short-lived bash `nohup`s the
+        // real worker into the background and returns immediately, so by the
+        // time this app terminates the worker is already re-parented to launchd
+        // and independent of our process group. stdio is sent to /dev/null so a
+        // dying parent descriptor can't SIGPIPE the worker mid-install.
         let process = Process()
         process.executableURL = URL(fileURLWithPath: "/bin/bash")
-        process.arguments = [scriptURL.path, pkgURL.path, appPath, String(pid)]
+        process.arguments = [
+            "-c",
+            "nohup /bin/bash \"$1\" \"$2\" \"$3\" \"$4\" >/dev/null 2>&1 &",
+            "ezlibrary-updater",
+            scriptURL.path,
+            pkgURL.path,
+            appPath,
+            String(pid)
+        ]
+        process.standardInput = FileHandle.nullDevice
+        process.standardOutput = FileHandle.nullDevice
+        process.standardError = FileHandle.nullDevice
         try process.run()
     }
 }
