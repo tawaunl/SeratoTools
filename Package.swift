@@ -9,6 +9,7 @@ let package = Package(
     products: [
         .executable(name: "EZLibrary", targets: ["EZLibraryApp"]),
         .executable(name: "EZLibraryCLI", targets: ["EZLibraryCLI"]),
+        .executable(name: "EZLibraryBench", targets: ["EZLibraryBench"]),
         .library(name: "EZLibraryCore", targets: ["EZLibraryCore"])
     ],
     targets: [
@@ -17,6 +18,10 @@ let package = Package(
         ),
         .executableTarget(
             name: "EZLibraryCLI",
+            dependencies: ["EZLibraryCore"]
+        ),
+        .executableTarget(
+            name: "EZLibraryBench",
             dependencies: ["EZLibraryCore"]
         ),
         .executableTarget(

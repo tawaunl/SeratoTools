@@ -4,6 +4,15 @@
   <img src="docs/files/ezlibrary_icon_glow_gold.png" alt="EZLibrary app icon" width="160" height="160">
 </p>
 
+<p align="center">
+  <a href="LICENSE"><img src="https://img.shields.io/badge/License-GPLv3-blue.svg" alt="License: GPL v3"></a>
+  <img src="https://img.shields.io/badge/platform-macOS%2014%2B-lightgrey.svg" alt="Platform: macOS 14+">
+  <img src="https://img.shields.io/badge/Swift-6-orange.svg" alt="Swift 6">
+  <a href="CONTRIBUTING.md"><img src="https://img.shields.io/badge/PRs-welcome-brightgreen.svg" alt="PRs welcome"></a>
+</p>
+
+> EZLibrary is free and open source software for DJs and hobbyists. Anyone is welcome to use it, study it, share it, and improve it under the terms of the [GNU GPL v3](LICENSE).
+
 > EZLibrary is an independent, community-built utility. It isn't affiliated with, endorsed by, or sponsored by Serato Audio Research or any other music platform referenced in this project. "Serato" is a trademark of its respective owner. This tool reads and writes Serato's library file format for interoperability purposes only.
 
 EZLibrary is a native macOS toolkit for DJs who want a cleaner, safer, and more reliable Serato library.
@@ -216,6 +225,22 @@ Installer note:
 Start with the troubleshooting Q and A guide:
 
 - [docs/TROUBLESHOOTING.md](docs/TROUBLESHOOTING.md)
+
+## Contributing
+
+EZLibrary is community-driven, and contributions from DJs and hobbyists are welcome —
+whether that's a bug report, a feature idea, docs, or code.
+
+- Read the [Contributing Guide](CONTRIBUTING.md) to get started.
+- Review our [Code of Conduct](CODE_OF_CONDUCT.md).
+- Open an [issue](https://github.com/tawaunl/SeratoTools/issues/new/choose) or pull request.
+
+## License
+
+EZLibrary is free and open source software licensed under the
+[GNU General Public License v3.0](LICENSE). You are free to use, study, share, and
+modify it. If you distribute a modified version, you must also release your changes
+under the GPL v3 so the community can keep benefiting from them.
 
 ## Status
 

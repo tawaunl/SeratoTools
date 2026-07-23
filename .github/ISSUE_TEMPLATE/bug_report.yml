@@ -1,0 +1,64 @@
+name: Bug report
+description: Report a problem with EZLibrary
+title: "[Bug]: "
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for taking the time to file a bug report!
+
+        > ⚠️ EZLibrary reads and writes real Serato library data. If your report
+        > involves library changes, please describe whether you were working on a
+        > backup or your primary collection.
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened?
+      description: A clear and concise description of the bug.
+      placeholder: When I..., EZLibrary...
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      description: How can we reproduce the problem?
+      placeholder: |
+        1. Open the '...' tab
+        2. Click on '...'
+        3. See error
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+      description: What did you expect to happen instead?
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: EZLibrary version
+      description: Found under "Check for Updates…" or the app's about info.
+      placeholder: e.g. 0.1.0.7
+    validations:
+      required: false
+  - type: input
+    id: macos-version
+    attributes:
+      label: macOS version
+      placeholder: e.g. macOS 14.5 (Apple Silicon)
+    validations:
+      required: false
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs or screenshots
+      description: |
+        Paste any relevant error messages, screenshots, or log output.
+        Update logs may be found at `~/Library/Logs/EZLibrary-Update.log`.
+      render: shell
+    validations:
+      required: false
