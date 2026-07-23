@@ -22,18 +22,23 @@ public enum TrackTextSearch {
     /// name when `includeFileName` is set — contain `query`, case-insensitively.
     /// An empty or whitespace-only query returns `tracks` unchanged.
     public static func filter(_ tracks: [Track], query: String, includeFileName: Bool = false) -> [Track] {
-        let needle = Array(query.trimmingCharacters(in: .whitespacesAndNewlines).lowercased().utf8)
+        let needle = needle(for: query)
         guard !needle.isEmpty else { return tracks }
         return tracks.filter { matches($0, needle: needle, includeFileName: includeFileName) }
     }
 
     /// Whether one track's searchable text contains an already-lowercased
     /// UTF-8 `needle`. Callers doing their own iteration should build `needle`
-    /// once (`Array(query.lowercased().utf8)`) and reuse it across tracks.
+    /// once (`needle(for:)`) and reuse it across tracks.
     public static func matches(_ track: Track, needle: [UInt8], includeFileName: Bool) -> Bool {
-        // One combined, lowercased blob per track (a single allocation) beats
-        // lowercasing each field separately. A control-byte separator keeps a
-        // query from matching across two fields.
+        matches(bytes: searchBytes(for: track, includeFileName: includeFileName), needle: needle)
+    }
+
+    /// The lowercased UTF-8 search "blob" for a track: title, artist, album,
+    /// and genre (and file name when requested) joined by a control-byte
+    /// separator that keeps a query from matching across two fields. Build
+    /// these once and cache them to search repeatedly without re-lowercasing.
+    public static func searchBytes(for track: Track, includeFileName: Bool = false) -> [UInt8] {
         var combined = track.title
         combined.append("\u{01}")
         combined.append(track.artist)
@@ -45,7 +50,19 @@ public enum TrackTextSearch {
             combined.append("\u{01}")
             combined.append(track.fileURL.lastPathComponent)
         }
-        return bytesContain(Array(combined.lowercased().utf8), needle)
+        return Array(combined.lowercased().utf8)
+    }
+
+    /// The lowercased UTF-8 bytes of a search query (trimmed). An empty result
+    /// means "match everything".
+    public static func needle(for query: String) -> [UInt8] {
+        Array(query.trimmingCharacters(in: .whitespacesAndNewlines).lowercased().utf8)
+    }
+
+    /// Whether prebuilt `bytes` (from `searchBytes(for:)`) contain `needle`.
+    /// An empty needle matches everything.
+    public static func matches(bytes: [UInt8], needle: [UInt8]) -> Bool {
+        needle.isEmpty || bytesContain(bytes, needle)
     }
 
     /// Plain byte substring search. `needle` must be non-empty.

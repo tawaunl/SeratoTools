@@ -37,6 +37,10 @@ struct TrackTableView: View {
     }
 
     let tracks: [Track]
+    /// Bumped by the parent whenever the identity OR text content of `tracks`
+    /// changes, so the search/selection-key index can be cached across search
+    /// keystrokes and rebuilt only when the data actually changes.
+    let tracksVersion: Int
     let numberingMode: NumberingMode
     let onDeleteRequested: (([Track]) -> Void)?
     let onMetadataEditRequested: ((Track, SeratoTrackMetadataUpdate) -> Void)?
@@ -52,12 +56,36 @@ struct TrackTableView: View {
     /// change did three string transforms across the whole table on every
     /// click.
     @State private var displayedKeys: [String] = []
+    /// Cached per-track search bytes + selection key, rebuilt only when
+    /// `tracksVersion`/numbering/count changes (not on every keystroke), so
+    /// search reuses the prebuilt byte blobs (~5ms) and never re-derives
+    /// selection keys after a sort.
+    @State private var indexedTracks: [IndexedTrack] = []
+    @State private var indexedKey: IndexKey?
     @State private var recomputeTask: Task<Void, Never>?
     @State private var sortColumn: SortColumn = .number
     @State private var sortAscending = true
 
+    /// A track paired with its prebuilt lowercased-UTF8 search bytes and its
+    /// selection key — the two per-track derivations that used to be redone on
+    /// every recompute.
+    private struct IndexedTrack {
+        let track: Track
+        let searchBytes: [UInt8]
+        let selectionKey: String
+    }
+
+    /// Identity of the cached `indexedTracks`. When this changes the index is
+    /// rebuilt; otherwise a recompute (search/sort) reuses it.
+    private struct IndexKey: Equatable {
+        let version: Int
+        let numberingMode: NumberingMode
+        let count: Int
+    }
+
     init(
         tracks: [Track],
+        tracksVersion: Int,
         numberingMode: NumberingMode = .metadata,
         onDeleteRequested: (([Track]) -> Void)? = nil,
         onMetadataEditRequested: ((Track, SeratoTrackMetadataUpdate) -> Void)? = nil,
@@ -66,6 +94,7 @@ struct TrackTableView: View {
         onTrackActivated: ((Track, [Track]) -> Void)? = nil
     ) {
         self.tracks = tracks
+        self.tracksVersion = tracksVersion
         self.numberingMode = numberingMode
         self.onDeleteRequested = onDeleteRequested
         self.onMetadataEditRequested = onMetadataEditRequested

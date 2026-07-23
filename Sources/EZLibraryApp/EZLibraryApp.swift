@@ -99,19 +99,29 @@ struct EZLibraryApp: App {
                         .textSelection(.enabled)
                 }
                 .task {
+                    // Deferred so the first paint and the initial library
+                    // load (ContentView's `.task`) aren't competing with a
+                    // network round-trip; the check is silent unless an
+                    // update is found, so a short delay is invisible.
+                    try? await Task.sleep(nanoseconds: 2_500_000_000)
                     await updateChecker.runAutomaticCheck()
                 }
                 .task {
                     // Verify on every launch that the Homebrew-managed tools
                     // (yt-dlp, ffmpeg, fpcalc) are installed and current, and
-                    // surface the readiness banner when they aren't.
+                    // surface the readiness banner when they aren't. Deferred
+                    // so spawning Homebrew subprocesses doesn't steal CPU from
+                    // the library parse during launch.
+                    try? await Task.sleep(nanoseconds: 1_500_000_000)
                     await dependencyReadiness.checkOnLaunch()
                 }
                 .task {
                     // Keep a user-writable yt-dlp current in the background so
                     // downloads don't depend on the frozen bundled snapshot,
                     // and refresh the Homebrew-managed tools (ffmpeg, yt-dlp,
-                    // chromaprint) so none of them go stale.
+                    // chromaprint) so none of them go stale. Deferred further
+                    // since it's the least time-sensitive launch work.
+                    try? await Task.sleep(nanoseconds: 4_000_000_000)
                     Task.detached(priority: .background) {
                         _ = YouTubeAudioImportService.refreshManagedYTDLPIfDue()
                         _ = HomebrewMaintenanceService.refreshIfDue()

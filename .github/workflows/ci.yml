@@ -11,6 +11,10 @@ concurrency:
   group: ci-${{ github.ref }}
   cancel-in-progress: true
 
+# Least privilege: these jobs only need to read the repository.
+permissions:
+  contents: read
+
 jobs:
   build-and-test:
     name: Build & Test
