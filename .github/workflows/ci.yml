@@ -17,7 +17,7 @@ jobs:
     runs-on: macos-15
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
       - name: Show Swift version
         run: swift --version
@@ -33,7 +33,7 @@ jobs:
     runs-on: macos-15
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
       - name: Install SwiftLint (if needed)
         run: which swiftlint || brew install swiftlint

@@ -67,7 +67,8 @@ struct CrateDetailView: View {
 
     @State private var content = ResolvedCrateContent()
 
-    var body: some View {
+    @ViewBuilder
+    private var resolvedContent: some View {
         Group {
             if let crate = content.crate, !(content.matchedTracks.isEmpty && content.unmatchedPaths.isEmpty) {
                 let matchedTracks = content.matchedTracks
@@ -129,42 +130,53 @@ struct CrateDetailView: View {
                 )
             }
         }
-        .sheet(isPresented: $isManagingTracks) {
-            if let crate = node.crate {
-                CrateTrackManagerView(crate: crate, libraryTracks: libraryService.tracks) {
-                    onCratesChanged()
+    }
+
+    /// `resolvedContent` plus its sheets and reactive modifiers, split from
+    /// `body` so the type-checker handles this chain and the alert/dialog
+    /// chain as two smaller expressions.
+    private var resolvedContentWithLifecycle: some View {
+        resolvedContent
+            .sheet(isPresented: $isManagingTracks) {
+                if let crate = node.crate {
+                    CrateTrackManagerView(crate: crate, libraryTracks: libraryService.tracks) {
+                        onCratesChanged()
+                    }
                 }
             }
-        }
-        .sheet(item: $metadataLookupTrack) { track in
-            TrackMetadataEditorSheet(track: track) { metadata in
-                try saveTrackMetadataEdit(track: track, metadata: metadata)
+            .sheet(item: $metadataLookupTrack) { track in
+                TrackMetadataEditorSheet(track: track) { metadata in
+                    try saveTrackMetadataEdit(track: track, metadata: metadata)
+                }
             }
-        }
-        .task(id: node.id) {
-            rebuildContent()
-        }
-        .onChange(of: node.id) {
-            selectedGenreFilter = nil
-        }
-        .onChange(of: filterMode) {
-            rebuildContent()
-        }
-        .onChange(of: libraryService.revision) {
-            rebuildContent()
-        }
-        .onChange(of: libraryService.crates) {
-            rebuildContent()
-        }
-        .onChange(of: libraryService.smartCrates) {
-            rebuildContent()
-        }
-        .onDisappear {
-            selectedGenreFilter = nil
-        }
-        .onReceive(NotificationCenter.default.publisher(for: NSApplication.willResignActiveNotification)) { _ in
-            selectedGenreFilter = nil
-        }
+            .task(id: node.id) {
+                rebuildContent()
+            }
+            .onChange(of: node.id) {
+                selectedGenreFilter = nil
+            }
+            .onChange(of: filterMode) {
+                rebuildContent()
+            }
+            .onChange(of: libraryService.revision) {
+                rebuildContent()
+            }
+            .onChange(of: libraryService.crates) {
+                rebuildContent()
+            }
+            .onChange(of: libraryService.smartCrates) {
+                rebuildContent()
+            }
+            .onDisappear {
+                selectedGenreFilter = nil
+            }
+            .onReceive(NotificationCenter.default.publisher(for: NSApplication.willResignActiveNotification)) { _ in
+                selectedGenreFilter = nil
+            }
+    }
+
+    var body: some View {
+        resolvedContentWithLifecycle
         .alert(
             "Couldn't Update Crate",
             isPresented: Binding(get: { trackEditErrorMessage != nil }, set: { if !$0 { trackEditErrorMessage = nil } })
