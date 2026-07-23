@@ -1,0 +1,66 @@
+# Lightweight SwiftLint configuration for EZLibrary.
+#
+# The goal here is high-signal style checks, not nitpicking. Size-based rules
+# are relaxed (SwiftUI view files are legitimately large), and rules that would
+# otherwise fail CI on judgment calls are downgraded to warnings.
+
+included:
+  - Sources
+  - Tests
+
+excluded:
+  - .build
+  - dist
+  - Packaging
+
+# Opt out of a few rules that are noisy for this codebase.
+disabled_rules:
+  - todo # TODO/FIXME notes are fine during active development
+  - trailing_comma # multiline trailing commas are a matter of taste
+
+# Don't let judgment-call rules hard-fail CI; surface them as warnings instead.
+force_cast:
+  severity: warning
+force_try:
+  severity: warning
+
+# Test helpers legitimately return 3-element tuples; only flag 5+.
+large_tuple:
+  warning: 4
+  error: 5
+
+line_length:
+  warning: 140
+  error: 400
+  ignores_comments: true
+  ignores_urls: true
+
+file_length:
+  warning: 2000
+  error: 4000
+  ignore_comment_only_lines: true
+
+type_body_length:
+  warning: 800
+  error: 2000
+
+function_body_length:
+  warning: 150
+  error: 400
+
+cyclomatic_complexity:
+  warning: 30
+  error: 60
+
+identifier_name:
+  min_length: 1
+  max_length: 80
+  allowed_symbols: ["_"]
+
+type_name:
+  max_length: 60
+
+nesting:
+  type_level: 3
+
+reporter: "xcode"

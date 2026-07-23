@@ -27,3 +27,19 @@ jobs:
 
       - name: Run tests
         run: swift test
+
+  lint:
+    name: SwiftLint
+    runs-on: macos-15
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install SwiftLint (if needed)
+        run: which swiftlint || brew install swiftlint
+
+      # Lightweight: reports style issues as annotations. Only error-severity
+      # violations fail the job (see .swiftlint.yml). Add `--strict` here later
+      # to also fail on warnings once they've been cleaned up.
+      - name: Run SwiftLint
+        run: swiftlint lint --reporter github-actions-logging

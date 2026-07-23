@@ -13,10 +13,18 @@ import Foundation
 /// High-level entry point for loading and managing a Serato library.
 @MainActor
 public final class LibraryService: ObservableObject {
-    @Published public private(set) var tracks: [Track] = []
+    @Published public private(set) var tracks: [Track] = [] {
+        didSet { revision &+= 1 }
+    }
     @Published public private(set) var crates: [Crate] = []
     @Published public private(set) var smartCrates: [Crate] = []
     @Published public private(set) var reloadErrorMessage: String?
+
+    /// Monotonic counter bumped whenever `tracks` is reassigned (reload,
+    /// tracks-only reload, or background play-count merge). Views can observe
+    /// this cheap `Int` instead of diffing the whole `[Track]` array to know
+    /// when to recompute derived data.
+    @Published public private(set) var revision: Int = 0
 
     /// Sorted, deduplicated genres/artist count across `tracks`. Recomputed
     /// once whenever `tracks` is reassigned rather than on every read, since

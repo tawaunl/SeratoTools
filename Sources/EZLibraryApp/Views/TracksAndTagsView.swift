@@ -53,7 +53,7 @@ struct TracksAndTagsView: View {
 
     private static let allTracksID = "all_tracks"
 
-    private enum FillField: Hashable {
+    private enum FillField: Hashable, Sendable {
         case artist
         case album
         case genre
@@ -87,6 +87,12 @@ struct TracksAndTagsView: View {
     @State private var pendingTopHitUpdates: [(Track, SeratoTrackMetadataUpdate)] = []
     @State private var showTopHitConfirmation = false
     @State private var showOnlyFillEmptyPrompt = false
+
+    /// Snapshot of everything derived from `tracks` + the active scope/filters,
+    /// recomputed off the main actor only when an input changes (never per
+    /// body evaluation). See `scheduleDerivedRecompute`.
+    @State private var derived = Derived()
+    @State private var derivedRecomputeTask: Task<Void, Never>?
 
     private var regularTree: [CrateNode] {
         CrateHierarchy.build(from: libraryService.crates)
@@ -123,68 +129,44 @@ struct TracksAndTagsView: View {
         return selectedNode?.pathComponents.joined(separator: " / ") ?? "All Tracks"
     }
 
-    private var scopeTracks: [Track] {
-        guard let selectedNode else {
-            return filteredTracks(from: libraryService.tracks)
-        }
+    // MARK: - Memoized derived data
+    //
+    // These used to be computed properties that re-ran on every SwiftUI body
+    // evaluation. At 50K tracks that was ~10 full O(n) passes per render
+    // (several allocating a `trimmingCharacters` copy per element), so any
+    // interaction hitched. They now read a cached `Derived` snapshot that is
+    // recomputed off the main actor only when its inputs change.
 
-        let resolver = TrackPathResolver(tracks: libraryService.tracks)
-        let selectedPaths = effectiveTrackPaths(for: selectedNode)
-        let tracks = selectedPaths.compactMap { resolver.resolve(path: $0) }
-        return filteredTracks(from: tracks)
+    private struct Derived: Sendable {
+        var scopeTracks: [Track] = []
+        var scopeGenres: [String] = []
+        var scopeGenreTracks: [Track] = []
+        var displayedTracks: [Track] = []
+        var artistFilledCount = 0
+        var albumFilledCount = 0
+        var genreFilledCount = 0
+        var yearFilledCount = 0
+        var globalArtistFilledCount = 0
+        var globalAlbumFilledCount = 0
+        var globalGenreFilledCount = 0
+        var globalYearFilledCount = 0
     }
 
-    private var scopeGenres: [String] {
-        let genres = scopeTracks
-            .map { $0.genre.trimmingCharacters(in: .whitespacesAndNewlines) }
-            .filter { !$0.isEmpty }
-        return Array(Set(genres)).sorted()
-    }
-
-    private var scopeGenreTracks: [Track] {
-        guard let selectedGenreFilter else { return scopeTracks }
-        return scopeTracks.filter { $0.genre == selectedGenreFilter }
-    }
-
-    private var displayedTracks: [Track] {
-        guard let fillFilter else { return scopeGenreTracks }
-        return scopeGenreTracks.filter { !isFilled(fillFilter, $0) }
-    }
+    private var scopeTracks: [Track] { derived.scopeTracks }
+    private var scopeGenres: [String] { derived.scopeGenres }
+    private var scopeGenreTracks: [Track] { derived.scopeGenreTracks }
+    private var displayedTracks: [Track] { derived.displayedTracks }
+    private var artistFilledCount: Int { derived.artistFilledCount }
+    private var albumFilledCount: Int { derived.albumFilledCount }
+    private var genreFilledCount: Int { derived.genreFilledCount }
+    private var yearFilledCount: Int { derived.yearFilledCount }
+    private var globalArtistFilledCount: Int { derived.globalArtistFilledCount }
+    private var globalAlbumFilledCount: Int { derived.globalAlbumFilledCount }
+    private var globalGenreFilledCount: Int { derived.globalGenreFilledCount }
+    private var globalYearFilledCount: Int { derived.globalYearFilledCount }
 
     private var filteredTree: [CrateNode] {
         filterTree(combinedTree)
-    }
-
-    private var artistFilledCount: Int {
-        scopeGenreTracks.filter { !$0.artist.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }.count
-    }
-
-    private var albumFilledCount: Int {
-        scopeGenreTracks.filter { !$0.album.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }.count
-    }
-
-    private var genreFilledCount: Int {
-        scopeGenreTracks.filter { !$0.genre.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }.count
-    }
-
-    private var yearFilledCount: Int {
-        scopeGenreTracks.filter { $0.year != nil }.count
-    }
-
-    private var globalArtistFilledCount: Int {
-        libraryService.tracks.filter { !$0.artist.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }.count
-    }
-
-    private var globalAlbumFilledCount: Int {
-        libraryService.tracks.filter { !$0.album.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }.count
-    }
-
-    private var globalGenreFilledCount: Int {
-        libraryService.tracks.filter { !$0.genre.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }.count
-    }
-
-    private var globalYearFilledCount: Int {
-        libraryService.tracks.filter { $0.year != nil }.count
     }
 
     var body: some View {
@@ -227,18 +209,32 @@ struct TracksAndTagsView: View {
             if selectedScopeID != Self.allTracksID, allNodesByID[selectedScopeID] == nil {
                 selectedScopeID = Self.allTracksID
             }
+            scheduleDerivedRecompute()
+        }
+        .onChange(of: libraryService.revision) {
+            scheduleDerivedRecompute()
         }
         .onChange(of: selectedScopeID) {
             selectedGenreFilter = nil
             fillFilter = nil
+            scheduleDerivedRecompute()
         }
         .onChange(of: selectedGenreFilter) {
             fillFilter = nil
+            scheduleDerivedRecompute()
+        }
+        .onChange(of: fillFilter) {
+            scheduleDerivedRecompute()
         }
         .onChange(of: searchText) {
             if let selectedGenreFilter, !scopeGenres.contains(selectedGenreFilter) {
                 self.selectedGenreFilter = nil
             }
+            scheduleDerivedRecompute(debounce: true)
+        }
+        .onDisappear {
+            derivedRecomputeTask?.cancel()
+            derivedRecomputeTask = nil
         }
         .alert(
             "Couldn't Update Tags",
@@ -986,8 +982,6 @@ struct TracksAndTagsView: View {
             return track.year != nil
         }
     }
-
-    private func toggleFillFilter(_ field: FillField) {
         // Nothing to isolate when every track in scope already has the field.
         let unfilledCount = scopeGenreTracks.filter { !isFilled(field, $0) }.count
         guard unfilledCount > 0 else {

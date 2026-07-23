@@ -162,3 +162,106 @@ timeIt("FULL reload() equivalent (main-thread)") {
     _ = Set(crates.lazy.flatMap(\.trackPaths)).count
     _ = CrateHierarchy.build(from: crates)
 }
+
+// MARK: - TrackTableView interaction costs (mirrors the app's logic)
+
+print("--- table interaction (\(tracks.count) rows) ---")
+
+// Filter (search) — lowercased contains across 4 fields, as computeDisplayedTracks does.
+timeIt("filter contains (query 'the')") {
+    let q = "the"
+    _ = tracks.filter {
+        $0.title.lowercased().contains(q)
+            || $0.artist.lowercased().contains(q)
+            || $0.genre.lowercased().contains(q)
+            || $0.album.lowercased().contains(q)
+    }
+}
+
+// Candidate A: case-insensitive range search (no per-field lowercased copy).
+timeIt("filter range(of:caseInsensitive)") {
+    let q = "the"
+    _ = tracks.filter {
+        $0.title.range(of: q, options: .caseInsensitive) != nil
+            || $0.artist.range(of: q, options: .caseInsensitive) != nil
+            || $0.genre.range(of: q, options: .caseInsensitive) != nil
+            || $0.album.range(of: q, options: .caseInsensitive) != nil
+    }
+}
+
+// Candidate B: precomputed lowercased blob per track (built once), then plain contains.
+var blobs: [String] = []
+timeIt("build lowercased blobs (ONCE per load)") {
+    blobs = tracks.map {
+        var s = $0.title; s += "\n"; s += $0.artist; s += "\n"; s += $0.genre; s += "\n"; s += $0.album
+        return s.lowercased()
+    }
+}
+timeIt("filter prebuilt blobs (per keystroke)") {
+    let q = "the"
+    _ = blobs.indices.filter { blobs[$0].contains(q) }
+}
+
+// Sort by title using the locale-aware comparison the table uses today.
+timeIt("sort title (localizedCaseInsensitive)") {
+    _ = tracks.sorted { $0.title.localizedCaseInsensitiveCompare($1.title) == .orderedAscending }
+}
+
+// Sort by a precomputed lowercased key (candidate optimization).
+timeIt("sort title (precomputed lowercased)") {
+    let keyed = tracks.map { (key: $0.title.lowercased(), track: $0) }
+    _ = keyed.sorted { $0.key < $1.key }
+}
+
+// selectionKey mapping — runs once per recompute over the whole result set.
+timeIt("selectionKey map (string transforms)") {
+    _ = tracks.map {
+        $0.seratoStoredPath
+            .replacingOccurrences(of: "\\", with: "/")
+            .trimmingCharacters(in: CharacterSet(charactersIn: "/"))
+            .lowercased()
+    }
+}
+
+// TracksAndTagsView per-body cascade: 8 fill-count passes (each O(n) with a
+// per-element trimmingCharacters allocation) + scope/genre/displayed filters.
+// ALL of this currently re-runs on every SwiftUI body evaluation.
+timeIt("stats: 8x count(trimming) per body") {
+    let ws = CharacterSet.whitespacesAndNewlines
+    for _ in 0..<4 {
+        _ = tracks.filter { !$0.artist.trimmingCharacters(in: ws).isEmpty }.count
+    }
+    _ = tracks.filter { !$0.album.trimmingCharacters(in: ws).isEmpty }.count
+    _ = tracks.filter { !$0.genre.trimmingCharacters(in: ws).isEmpty }.count
+    _ = tracks.filter { $0.year != nil }.count
+    _ = tracks.filter { !$0.artist.trimmingCharacters(in: ws).isEmpty }.count
+}
+
+// Cheaper equivalent without trimming allocations (candidate optimization).
+timeIt("stats: 8x count(no-trim) per body") {
+    @inline(__always) func nonEmpty(_ s: String) -> Bool {
+        for ch in s.unicodeScalars where !CharacterSet.whitespacesAndNewlines.contains(ch) { return true }
+        return false
+    }
+    for _ in 0..<6 { _ = tracks.reduce(0) { nonEmpty($1.artist) ? $0 + 1 : $0 } }
+    _ = tracks.reduce(0) { $1.year != nil ? $0 + 1 : $0 }
+    _ = tracks.reduce(0) { nonEmpty($1.genre) ? $0 + 1 : $0 }
+}
+
+
+// playCountSignature — O(n) sum recomputed on EVERY SwiftUI body evaluation.
+timeIt("playCountSignature (per body eval!)") {
+    var sum = 0
+    for t in tracks { sum = sum &+ (t.playCount ?? 0) }
+    _ = sum
+}
+
+// tracksDiffer — O(n) id+playCount compare on EVERY updateNSView pass.
+timeIt("tracksDiffer (per updateNSView!)") {
+    var differ = false
+    for i in tracks.indices where tracks[i].id != tracks[i].id || tracks[i].playCount != tracks[i].playCount {
+        differ = true
+    }
+    _ = differ
+}
+

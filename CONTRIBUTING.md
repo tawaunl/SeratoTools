@@ -42,11 +42,11 @@ swift test
 
 ### Pointing at a test library
 
-Set `SERATOTOOLS_LIBRARY_DIR` to run against a safe, disposable `_Serato_` directory
+Set `EZLIBRARY_LIBRARY_DIR` to run against a safe, disposable `_Serato_` directory
 instead of your real one:
 
 ```bash
-SERATOTOOLS_LIBRARY_DIR="/tmp/_Serato_" swift run EZLibrary
+EZLIBRARY_LIBRARY_DIR="/tmp/_Serato_" swift run EZLibrary
 ```
 
 ## Pull Request Workflow
@@ -73,6 +73,21 @@ SERATOTOOLS_LIBRARY_DIR="/tmp/_Serato_" swift run EZLibrary
   shared and verified.
 - Do not commit network-dependent live tests; keep tests offline and deterministic.
 - Match the existing code style and naming conventions already used in the file.
+
+## Linting
+
+The project uses a lightweight [SwiftLint](https://github.com/realm/SwiftLint)
+config ([.swiftlint.yml](.swiftlint.yml)). CI runs it on every push and PR, and
+only error-severity violations fail the build.
+
+```bash
+brew install swiftlint   # once
+swiftlint lint
+```
+
+> On a Command Line Tools–only setup (no full Xcode), point SwiftLint at the CLT
+> SourceKit if it fails to load:
+> `DYLD_FRAMEWORK_PATH=/Library/Developer/CommandLineTools/usr/lib swiftlint lint`
 
 ## Reporting Security Issues
 
