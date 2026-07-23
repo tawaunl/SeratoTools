@@ -4,6 +4,11 @@ Notable changes per release. The version headings match the packaged build
 version (`CFBundleShortVersionString.CFBundleVersion`) and are used verbatim by
 `Scripts/release.sh` to populate the GitHub release notes.
 
+> **Maintenance commitment.** EZLibrary is actively maintained, with new releases
+> roughly monthly (more often for fixes). Data-integrity and security issues are
+> the highest priority — see [SECURITY.md](../SECURITY.md). This changelog is kept
+> up to date so you can see exactly what changed and when.
+
 ## 0.1.0.7
 
 ### Tracks & Tags are now one section

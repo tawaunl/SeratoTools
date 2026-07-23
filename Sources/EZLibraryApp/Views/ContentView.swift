@@ -1,3 +1,13 @@
+// EZLibrary — an open source toolkit for Serato DJ libraries.
+// Copyright (C) 2026 Tawaun Lucas
+// SPDX-License-Identifier: GPL-3.0-or-later
+//
+// This program is free software: you can redistribute it and/or modify it
+// under the terms of the GNU General Public License as published by the Free
+// Software Foundation, either version 3 of the License, or (at your option)
+// any later version. It is distributed WITHOUT ANY WARRANTY; see the GNU
+// General Public License (LICENSE) for more details.
+
 import SwiftUI
 import AppKit
 import EZLibraryCore
@@ -137,7 +147,7 @@ struct ContentView: View {
         }
         .task {
             libraryPathDraft = libraryService.libraryDirectory.path
-            reloadLibrary()
+            await reloadLibraryAsync()
         }
         .onChange(of: selectedSection) {
             resetTransientFilters()
@@ -490,19 +500,29 @@ struct ContentView: View {
     }
 
     private func reloadLibrary() {
+        // Kicks off the off-main parse; call sites (child "library changed"
+        // callbacks, buttons) stay synchronous.
+        Task { await reloadLibraryAsync() }
+    }
+
+    /// Reloads the library with the heavy parse performed off the main actor
+    /// (see `LibraryService.reloadAsync`), then refreshes the crate trees and
+    /// selection on the main actor once results arrive.
+    private func reloadLibraryAsync() async {
         let previousSelectedNodeID = selectedCrateNode?.id
 
-        do {
-            try libraryService.reload()
+        await libraryService.reloadAsync()
+
+        if let message = libraryService.reloadErrorMessage {
+            loadErrorMessage = message
+            crateHierarchy.rebuild(from: [])
+            smartCrateHierarchy.rebuild(from: [])
+            selectedCrateNode = nil
+        } else {
             loadErrorMessage = nil
             crateHierarchy.rebuild(from: libraryService.crates)
             smartCrateHierarchy.rebuild(from: libraryService.smartCrates)
             selectedCrateNode = refreshedSelectedCrateNode(previousID: previousSelectedNodeID)
-        } catch {
-            loadErrorMessage = error.localizedDescription
-            crateHierarchy.rebuild(from: [])
-            smartCrateHierarchy.rebuild(from: [])
-            selectedCrateNode = nil
         }
     }
 

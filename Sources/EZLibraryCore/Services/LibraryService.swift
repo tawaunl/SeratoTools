@@ -1,3 +1,13 @@
+// EZLibrary — an open source toolkit for Serato DJ libraries.
+// Copyright (C) 2026 Tawaun Lucas
+// SPDX-License-Identifier: GPL-3.0-or-later
+//
+// This program is free software: you can redistribute it and/or modify it
+// under the terms of the GNU General Public License as published by the Free
+// Software Foundation, either version 3 of the License, or (at your option)
+// any later version. It is distributed WITHOUT ANY WARRANTY; see the GNU
+// General Public License (LICENSE) for more details.
+
 import Foundation
 
 /// High-level entry point for loading and managing a Serato library.
@@ -26,6 +36,16 @@ public final class LibraryService: ObservableObject {
     /// Cancelled and restarted whenever `tracks` is reloaded.
     private var playCountLoadTask: Task<Void, Never>?
 
+    /// Monotonic token incremented on each async reload so a slow parse that
+    /// finishes after a newer reload started can't overwrite fresher data.
+    private var reloadGeneration = 0
+
+    /// Sendable outcome carried back from the off-main parse.
+    private enum LoadOutcome: Sendable {
+        case loaded(tracks: [Track], crates: [Crate], smartCrates: [Crate])
+        case failed(String)
+    }
+
     public init(libraryDirectory: URL = SeratoLibraryLocator.defaultLibraryDirectory) {
         self.libraryDirectory = libraryDirectory
     }
@@ -42,26 +62,72 @@ public final class LibraryService: ObservableObject {
         SeratoLibraryLocator.subcratesDirectory(in: libraryDirectory)
     }
 
+    /// Synchronous reload. Parses the whole library on the calling actor;
+    /// prefer `reloadAsync()` on the main actor so the parse doesn't block
+    /// the UI on large libraries.
     public func reload() throws {
-        defer {
-            refreshDerivedTrackStats()
-            tracksInCratesCount = Set(crates.lazy.flatMap(\.trackPaths)).count
-        }
-
         let rootDirectory = SeratoLibraryLocator.rootDirectory(for: libraryDirectory)
         do {
-            tracks = try SeratoDatabaseParser.parseTracks(at: databaseFile, rootDirectory: rootDirectory)
-            crates = Self.loadCrates(from: SeratoLibraryLocator.subcrateFiles(in: libraryDirectory))
-            smartCrates = Self.loadCrates(from: SeratoLibraryLocator.smartCrateFiles(in: libraryDirectory))
-            reloadErrorMessage = nil
-            loadPlayCounts(for: tracks)
+            let tracks = try SeratoDatabaseParser.parseTracks(at: databaseFile, rootDirectory: rootDirectory)
+            let crates = Self.loadCrates(from: SeratoLibraryLocator.subcrateFiles(in: libraryDirectory))
+            let smartCrates = Self.loadCrates(from: SeratoLibraryLocator.smartCrateFiles(in: libraryDirectory))
+            apply(tracks: tracks, crates: crates, smartCrates: smartCrates)
         } catch {
-            tracks = []
-            crates = []
-            smartCrates = []
-            reloadErrorMessage = error.localizedDescription
+            applyFailure(error.localizedDescription)
             throw error
         }
+    }
+
+    /// Reloads the library with the expensive parse + crate load performed
+    /// off the main actor, then publishes the results back on the main actor.
+    /// The UI stays responsive throughout, even for 50K-track databases.
+    public func reloadAsync() async {
+        reloadGeneration += 1
+        let generation = reloadGeneration
+        let libraryDirectory = self.libraryDirectory
+
+        let outcome = await Task.detached(priority: .userInitiated) { () -> LoadOutcome in
+            let rootDirectory = SeratoLibraryLocator.rootDirectory(for: libraryDirectory)
+            let databaseFile = SeratoLibraryLocator.databaseFile(in: libraryDirectory)
+            do {
+                let tracks = try SeratoDatabaseParser.parseTracks(at: databaseFile, rootDirectory: rootDirectory)
+                let crates = Self.loadCrates(from: SeratoLibraryLocator.subcrateFiles(in: libraryDirectory))
+                let smartCrates = Self.loadCrates(from: SeratoLibraryLocator.smartCrateFiles(in: libraryDirectory))
+                return .loaded(tracks: tracks, crates: crates, smartCrates: smartCrates)
+            } catch {
+                return .failed(error.localizedDescription)
+            }
+        }.value
+
+        // A newer reload was requested while this parse was running — drop
+        // this (now stale) result rather than clobbering the fresher one.
+        guard generation == reloadGeneration else { return }
+
+        switch outcome {
+        case let .loaded(tracks, crates, smartCrates):
+            apply(tracks: tracks, crates: crates, smartCrates: smartCrates)
+        case let .failed(message):
+            applyFailure(message)
+        }
+    }
+
+    private func apply(tracks: [Track], crates: [Crate], smartCrates: [Crate]) {
+        self.tracks = tracks
+        self.crates = crates
+        self.smartCrates = smartCrates
+        reloadErrorMessage = nil
+        refreshDerivedTrackStats()
+        tracksInCratesCount = Set(crates.lazy.flatMap(\.trackPaths)).count
+        loadPlayCounts(for: tracks)
+    }
+
+    private func applyFailure(_ message: String) {
+        tracks = []
+        crates = []
+        smartCrates = []
+        reloadErrorMessage = message
+        refreshDerivedTrackStats()
+        tracksInCratesCount = 0
     }
 
     public func reloadTracksOnly() throws {
@@ -131,7 +197,10 @@ public final class LibraryService: ObservableObject {
     /// any real-subdirectory nesting on top of the `≫≫`-delimited filename
     /// nesting `SeratoCrateParser` already handles, so both nesting
     /// mechanisms produce one consistent flat path for `CrateHierarchy`.
-    private static func loadCrates(from entries: [SeratoLibraryLocator.CrateFileEntry]) -> [Crate] {
+    ///
+    /// `nonisolated` so it can run on the background parse task alongside
+    /// `SeratoDatabaseParser`.
+    nonisolated private static func loadCrates(from entries: [SeratoLibraryLocator.CrateFileEntry]) -> [Crate] {
         entries.compactMap { entry in
             guard var crate = try? SeratoCrateParser.parseCrate(at: entry.url) else { return nil }
             crate.pathComponents = entry.directoryComponents + crate.pathComponents

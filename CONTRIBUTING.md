@@ -10,7 +10,7 @@ project's [GNU General Public License v3.0](LICENSE).
 
 ## Ways to Contribute
 
-- **Report bugs** — Open a [bug report](https://github.com/tawaunl/SeratoTools/issues/new/choose)
+- **Report bugs** — Open a [bug report](https://github.com/tawaunl/EZLibrary/issues/new/choose)
   with clear steps to reproduce.
 - **Request features** — Open a feature request describing the DJ/library workflow you'd like to see.
 - **Improve docs** — Fixes to the README or files under `docs/` are always appreciated.

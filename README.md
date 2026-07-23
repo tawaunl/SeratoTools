@@ -6,8 +6,11 @@
 
 <p align="center">
   <a href="LICENSE"><img src="https://img.shields.io/badge/License-GPLv3-blue.svg" alt="License: GPL v3"></a>
+  <a href="https://github.com/tawaunl/EZLibrary/actions/workflows/ci.yml"><img src="https://github.com/tawaunl/EZLibrary/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
   <img src="https://img.shields.io/badge/platform-macOS%2014%2B-lightgrey.svg" alt="Platform: macOS 14+">
   <img src="https://img.shields.io/badge/Swift-6-orange.svg" alt="Swift 6">
+  <img src="https://img.shields.io/badge/tests-100%2B-success.svg" alt="100+ tests">
+  <img src="https://img.shields.io/badge/maintained-yes-brightgreen.svg" alt="Maintained: yes">
   <a href="CONTRIBUTING.md"><img src="https://img.shields.io/badge/PRs-welcome-brightgreen.svg" alt="PRs welcome"></a>
 </p>
 
@@ -27,6 +30,30 @@ From broken file paths to crate organization to bulk metadata cleanup, EZLibrary
 - Batch-fix metadata for cleaner browsing and searching
 - Consolidate scattered libraries without breaking references
 - Run safer write operations with backup and atomic update patterns
+
+## Built to Be Trusted
+
+Your library is irreplaceable, and this space has a lot of churn-and-abandon apps.
+EZLibrary is built and maintained to be different — and every claim here is
+something you can verify in this repository:
+
+- **Real automated test suite.** 100+ automated tests across 18 suites cover the
+  parsers, writers, and safety-critical services. See
+  [Tests/EZLibraryCoreTests/](Tests/EZLibraryCoreTests).
+- **Documented engineering standards.** Contributions follow written rules,
+  including required human-readable error messages. See
+  [docs/ENGINEERING_RULES.md](docs/ENGINEERING_RULES.md).
+- **Backup-before-write + atomic writes + read-back verification.** Every write to
+  your Serato files is snapshotted first, written atomically, and verified — with
+  rollback if anything fails. See [docs/DATA_SAFETY.md](docs/DATA_SAFETY.md).
+- **Open, incremental history.** The full commit history is public, so you can see
+  the work evolve — this wasn't thrown together in a weekend.
+- **Actively maintained.** New releases land roughly monthly. See the
+  [changelog](docs/CHANGELOG.md).
+- **Clear security policy.** Data-loss and security issues have a defined,
+  high-priority reporting path. See [SECURITY.md](SECURITY.md).
+- **Free and open source.** Licensed under [GPLv3](LICENSE) — inspect it, fork it,
+  improve it.
 
 ## Product Surfaces
 
@@ -155,8 +182,15 @@ EZLibrary is built to reduce risk during library mutation.
 
 - Explicit user actions for sensitive operations
 - No silent auto-repair in missing-track workflows
-- Backup plus atomic-write patterns in core services
+- Automatic timestamped snapshot of every Serato file **before** it is written
+- Atomic writes (temp-file-then-rename) so a crash can't corrupt `database V2`
+- Read-back verification after metadata writes, with rollback on failure
+- Refuses to write while Serato is running to avoid clobbered edits
 - User-readable LocalizedError messages for recovery guidance
+
+For a detailed, code-referenced explanation of what gets backed up, what is
+atomic, and what happens if a write fails midway, see
+**[docs/DATA_SAFETY.md](docs/DATA_SAFETY.md)**.
 
 ## Requirements
 
@@ -169,6 +203,11 @@ EZLibrary is built to reduce risk during library mutation.
 - Optional: EZLIBRARY_ACOUSTID_KEY
 
 ## Test
+
+EZLibrary ships with a real automated test suite — 100+ tests across 18 suites in
+[Tests/EZLibraryCoreTests/](Tests/EZLibraryCoreTests) — covering the Serato format
+parsers/writers, the backup and atomic-write safety layer, and the core services.
+Tests are offline and deterministic.
 
 ```bash
 swift test
@@ -215,16 +254,31 @@ Installer note:
 ## Docs
 
 - [docs/TROUBLESHOOTING.md](docs/TROUBLESHOOTING.md)
+- [docs/DATA_SAFETY.md](docs/DATA_SAFETY.md)
+- [docs/CHANGELOG.md](docs/CHANGELOG.md)
 - [docs/ROADMAP.md](docs/ROADMAP.md)
 - [docs/PACKAGING_STANDALONE.md](docs/PACKAGING_STANDALONE.md)
 - [docs/FINDER_QUICK_ACTION_ADD_MUSIC.md](docs/FINDER_QUICK_ACTION_ADD_MUSIC.md)
 - [docs/ENGINEERING_RULES.md](docs/ENGINEERING_RULES.md)
+- [SECURITY.md](SECURITY.md)
 
 ## Need Help?
 
 Start with the troubleshooting Q and A guide:
 
 - [docs/TROUBLESHOOTING.md](docs/TROUBLESHOOTING.md)
+
+## Maintenance and Support
+
+EZLibrary is actively maintained, with new releases landing roughly monthly (more
+often for fixes). Progress is tracked in the open:
+
+- **What changed and when:** [docs/CHANGELOG.md](docs/CHANGELOG.md)
+- **What's planned:** [docs/ROADMAP.md](docs/ROADMAP.md)
+- **Report a bug or request a feature:** [open an issue](https://github.com/tawaunl/EZLibrary/issues/new/choose)
+- **Report a security or data-loss issue:** [SECURITY.md](SECURITY.md)
+
+Data-integrity and security issues are the highest priority in the tracker.
 
 ## Contributing
 
@@ -233,7 +287,7 @@ whether that's a bug report, a feature idea, docs, or code.
 
 - Read the [Contributing Guide](CONTRIBUTING.md) to get started.
 - Review our [Code of Conduct](CODE_OF_CONDUCT.md).
-- Open an [issue](https://github.com/tawaunl/SeratoTools/issues/new/choose) or pull request.
+- Open an [issue](https://github.com/tawaunl/EZLibrary/issues/new/choose) or pull request.
 
 ## License
 
