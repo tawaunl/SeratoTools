@@ -982,6 +982,127 @@ struct TracksAndTagsView: View {
             return track.year != nil
         }
     }
+
+    // MARK: - Off-main derived-data recompute
+
+    /// Recomputes the memoized `Derived` snapshot off the main actor, snapping
+    /// the current inputs first. Coalesces rapid triggers by cancelling any
+    /// in-flight recompute; `debounce` adds a short delay for fast-changing
+    /// inputs like the search field.
+    private func scheduleDerivedRecompute(debounce: Bool = false) {
+        derivedRecomputeTask?.cancel()
+
+        let allTracks = libraryService.tracks
+        let selectedPaths: [String]? = selectedNode.map { effectiveTrackPaths(for: $0) }
+        let genre = selectedGenreFilter
+        let fill = fillFilter
+        let query = searchText.trimmingCharacters(in: .whitespacesAndNewlines)
+
+        derivedRecomputeTask = Task(priority: .userInitiated) {
+            if debounce {
+                try? await Task.sleep(nanoseconds: 120_000_000)
+            }
+            guard !Task.isCancelled else { return }
+
+            let result = await Self.computeDerivedAsync(
+                allTracks: allTracks,
+                selectedPaths: selectedPaths,
+                genre: genre,
+                fill: fill,
+                query: query
+            )
+
+            guard !Task.isCancelled else { return }
+            derived = result
+        }
+    }
+
+    nonisolated private static func computeDerivedAsync(
+        allTracks: [Track],
+        selectedPaths: [String]?,
+        genre: String?,
+        fill: FillField?,
+        query: String
+    ) async -> Derived {
+        await withCheckedContinuation { continuation in
+            DispatchQueue.global(qos: .userInitiated).async {
+                continuation.resume(returning: computeDerived(
+                    allTracks: allTracks,
+                    selectedPaths: selectedPaths,
+                    genre: genre,
+                    fill: fill,
+                    query: query
+                ))
+            }
+        }
+    }
+
+    nonisolated private static func computeDerived(
+        allTracks: [Track],
+        selectedPaths: [String]?,
+        genre: String?,
+        fill: FillField?,
+        query: String
+    ) -> Derived {
+        let base: [Track]
+        if let selectedPaths {
+            let resolver = TrackPathResolver(tracks: allTracks)
+            base = selectedPaths.compactMap { resolver.resolve(path: $0) }
+        } else {
+            base = allTracks
+        }
+
+        let scope: [Track]
+        if query.isEmpty {
+            scope = base
+        } else {
+            scope = base.filter { track in
+                track.title.localizedCaseInsensitiveContains(query)
+                    || track.artist.localizedCaseInsensitiveContains(query)
+                    || track.album.localizedCaseInsensitiveContains(query)
+                    || track.genre.localizedCaseInsensitiveContains(query)
+                    || track.fileURL.lastPathComponent.localizedCaseInsensitiveContains(query)
+            }
+        }
+
+        let whitespace = CharacterSet.whitespacesAndNewlines
+        let genres = Array(Set(scope
+            .map { $0.genre.trimmingCharacters(in: whitespace) }
+            .filter { !$0.isEmpty })).sorted()
+
+        let scopeGenre = genre.map { value in scope.filter { $0.genre == value } } ?? scope
+        let displayed = fill.map { field in scopeGenre.filter { !isFilledStatic(field, $0) } } ?? scopeGenre
+
+        var result = Derived()
+        result.scopeTracks = scope
+        result.scopeGenres = genres
+        result.scopeGenreTracks = scopeGenre
+        result.displayedTracks = displayed
+        result.artistFilledCount = scopeGenre.reduce(0) { isFilledStatic(.artist, $1) ? $0 + 1 : $0 }
+        result.albumFilledCount = scopeGenre.reduce(0) { isFilledStatic(.album, $1) ? $0 + 1 : $0 }
+        result.genreFilledCount = scopeGenre.reduce(0) { isFilledStatic(.genre, $1) ? $0 + 1 : $0 }
+        result.yearFilledCount = scopeGenre.reduce(0) { isFilledStatic(.year, $1) ? $0 + 1 : $0 }
+        result.globalArtistFilledCount = allTracks.reduce(0) { isFilledStatic(.artist, $1) ? $0 + 1 : $0 }
+        result.globalAlbumFilledCount = allTracks.reduce(0) { isFilledStatic(.album, $1) ? $0 + 1 : $0 }
+        result.globalGenreFilledCount = allTracks.reduce(0) { isFilledStatic(.genre, $1) ? $0 + 1 : $0 }
+        result.globalYearFilledCount = allTracks.reduce(0) { isFilledStatic(.year, $1) ? $0 + 1 : $0 }
+        return result
+    }
+
+    nonisolated private static func isFilledStatic(_ field: FillField, _ track: Track) -> Bool {
+        switch field {
+        case .artist:
+            return !track.artist.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        case .album:
+            return !track.album.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        case .genre:
+            return !track.genre.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        case .year:
+            return track.year != nil
+        }
+    }
+
+    private func toggleFillFilter(_ field: FillField) {
         // Nothing to isolate when every track in scope already has the field.
         let unfilledCount = scopeGenreTracks.filter { !isFilled(field, $0) }.count
         guard unfilledCount > 0 else {

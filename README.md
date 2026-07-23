@@ -31,29 +31,52 @@ From broken file paths to crate organization to bulk metadata cleanup, EZLibrary
 - Consolidate scattered libraries without breaking references
 - Run safer write operations with backup and atomic update patterns
 
-## Built to Be Trusted
+## Why Trust EZLibrary
 
-Your library is irreplaceable, and this space has a lot of churn-and-abandon apps.
-EZLibrary is built and maintained to be different — and every claim here is
-something you can verify in this repository:
+EZLibrary reads and writes your Serato library directly. Before you point any tool
+at your crates, it's worth knowing who built it and how — and every claim here is
+something you can verify in this repository.
 
-- **Real automated test suite.** 100+ automated tests across 18 suites cover the
-  parsers, writers, and safety-critical services. See
-  [Tests/EZLibraryCoreTests/](Tests/EZLibraryCoreTests).
-- **Documented engineering standards.** Contributions follow written rules,
-  including required human-readable error messages. See
-  [docs/ENGINEERING_RULES.md](docs/ENGINEERING_RULES.md).
-- **Backup-before-write + atomic writes + read-back verification.** Every write to
-  your Serato files is snapshotted first, written atomically, and verified — with
-  rollback if anything fails. See [docs/DATA_SAFETY.md](docs/DATA_SAFETY.md).
-- **Open, incremental history.** The full commit history is public, so you can see
-  the work evolve — this wasn't thrown together in a weekend.
-- **Actively maintained.** New releases land roughly monthly. See the
-  [changelog](docs/CHANGELOG.md).
-- **Clear security policy.** Data-loss and security issues have a defined,
-  high-priority reporting path. See [SECURITY.md](SECURITY.md).
-- **Free and open source.** Licensed under [GPLv3](LICENSE) — inspect it, fork it,
-  improve it.
+**Not affiliated with Serato Audio Research.** EZLibrary is an independent project.
+It isn't sponsored, endorsed, or reviewed by Serato. It reads and writes Serato's
+library file format for interoperability purposes only.
+
+**Real commit history, not a weekend drop.** Check the commit log yourself — this
+project has grown incrementally across **150+ commits and 7 releases**, with
+ongoing fixes, tests, and refactors, not a single large initial commit followed by
+silence.
+
+**Tested, not just tried.** The core parsing, writing, and safety logic lives in
+`EZLibraryCore` and is covered by a real automated test suite (100+ tests) in
+[Tests/EZLibraryCoreTests/](Tests/EZLibraryCoreTests). Run `swift test` yourself to
+see what's checked, and it runs in CI on every push.
+
+**Documented engineering standards.** See
+[docs/ENGINEERING_RULES.md](docs/ENGINEERING_RULES.md) for the rules this project
+holds itself to around safe data mutation, error handling, and review.
+
+**Built for safe writes, not just fast ones.** Every operation that touches your
+library — import, tag edit, consolidation, missing-track repair — runs through
+backup-first and atomic-write patterns with read-back verification, so a failed
+operation doesn't leave your crates half-written or corrupted. See
+[docs/SECURITY_AND_DATA_HANDLING.md](docs/SECURITY_AND_DATA_HANDLING.md) and
+[docs/DATA_SAFETY.md](docs/DATA_SAFETY.md) for specifics.
+
+**Actively maintained.** 7 releases so far, with updates landing roughly monthly
+(more often for fixes). Check the
+[Releases](https://github.com/tawaunl/EZLibrary/releases) page and the
+[changelog](docs/CHANGELOG.md) for the latest activity — not just a README that
+hasn't been touched in months.
+
+**Open where it counts.** The entire engine is open source and auditable under
+[GPLv3](LICENSE). You don't have to trust a black box with your crates.
+
+> There's been a real uptick in AI-generated DJ tools published with little to no
+> commit history, no tests, and no long-term maintenance plan. Several have quietly
+> become abandonware within months of release — a real risk when a tool has write
+> access to your entire library. Before trusting any tool with your Serato data,
+> check its commit history, test coverage, and how recently it's been updated.
+> EZLibrary is built to hold up to that scrutiny.
 
 ## Product Surfaces
 
@@ -254,6 +277,7 @@ Installer note:
 ## Docs
 
 - [docs/TROUBLESHOOTING.md](docs/TROUBLESHOOTING.md)
+- [docs/SECURITY_AND_DATA_HANDLING.md](docs/SECURITY_AND_DATA_HANDLING.md)
 - [docs/DATA_SAFETY.md](docs/DATA_SAFETY.md)
 - [docs/CHANGELOG.md](docs/CHANGELOG.md)
 - [docs/ROADMAP.md](docs/ROADMAP.md)
