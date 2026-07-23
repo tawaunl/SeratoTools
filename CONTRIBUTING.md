@@ -89,6 +89,25 @@ swiftlint lint
 > SourceKit if it fails to load:
 > `DYLD_FRAMEWORK_PATH=/Library/Developer/CommandLineTools/usr/lib swiftlint lint`
 
+## Secret Scanning
+
+Never commit credentials (API tokens, keys, `.env` files, private keys). The repo
+is protected on several layers:
+
+- A **pre-commit hook** ([.githooks/pre-commit](.githooks/pre-commit)) scans staged
+  changes with [gitleaks](https://github.com/gitleaks/gitleaks) and blocks the
+  commit if a secret is found. Enable it once per clone:
+  ```bash
+  brew install gitleaks           # once
+  git config core.hooksPath .githooks
+  ```
+- **CI** runs a gitleaks scan on every push and PR
+  ([.github/workflows/secret-scan.yml](.github/workflows/secret-scan.yml)).
+- **GitHub push protection** blocks pushes that contain recognized secrets.
+
+If gitleaks flags a false positive, add an allowlist entry to
+[.gitleaks.toml](.gitleaks.toml) rather than disabling the scan.
+
 ## Reporting Security Issues
 
 If you discover a security or data-loss vulnerability, please do **not** open a

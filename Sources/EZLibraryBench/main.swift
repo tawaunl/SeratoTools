@@ -202,6 +202,51 @@ timeIt("filter prebuilt blobs (per keystroke)") {
     _ = blobs.indices.filter { blobs[$0].contains(q) }
 }
 
+// Candidate C: precomputed lowercased UTF-8 BYTE blobs + byte substring search
+// (avoids String.contains grapheme segmentation entirely).
+func byteContains(_ haystack: [UInt8], _ needle: [UInt8]) -> Bool {
+    guard !needle.isEmpty, needle.count <= haystack.count else { return false }
+    let first = needle[0]
+    let limit = haystack.count - needle.count
+    var i = 0
+    while i <= limit {
+        if haystack[i] == first {
+            var j = 1
+            while j < needle.count, haystack[i + j] == needle[j] { j += 1 }
+            if j == needle.count { return true }
+        }
+        i += 1
+    }
+    return false
+}
+
+var byteBlobs: [[UInt8]] = []
+timeIt("build lowercased BYTE blobs (ONCE per load)") {
+    byteBlobs = tracks.map {
+        var s = $0.title; s += "\u{01}"; s += $0.artist; s += "\u{01}"; s += $0.genre; s += "\u{01}"; s += $0.album
+        return Array(s.lowercased().utf8)
+    }
+}
+timeIt("filter BYTE blobs (per keystroke)") {
+    let needle = Array("the".utf8)
+    _ = byteBlobs.indices.filter { byteContains(byteBlobs[$0], needle) }
+}
+// A rarer query (fewer hits) to show worst-case scan cost.
+timeIt("filter BYTE blobs (rare query)") {
+    let needle = Array("zxqw".utf8)
+    _ = byteBlobs.indices.filter { byteContains(byteBlobs[$0], needle) }
+}
+
+// Candidate D: NON-cached — build combined blob + byte-search per keystroke
+// (what TrackTextSearch.filter does without a persisted index).
+timeIt("filter combined byte (build+search/keystroke)") {
+    let needle = Array("the".utf8)
+    _ = tracks.filter { t in
+        var s = t.title; s += "\u{01}"; s += t.artist; s += "\u{01}"; s += t.album; s += "\u{01}"; s += t.genre
+        return byteContains(Array(s.lowercased().utf8), needle)
+    }
+}
+
 // Sort by title using the locale-aware comparison the table uses today.
 timeIt("sort title (localizedCaseInsensitive)") {
     _ = tracks.sorted { $0.title.localizedCaseInsensitiveCompare($1.title) == .orderedAscending }

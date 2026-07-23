@@ -1056,13 +1056,7 @@ struct TracksAndTagsView: View {
         if query.isEmpty {
             scope = base
         } else {
-            scope = base.filter { track in
-                track.title.localizedCaseInsensitiveContains(query)
-                    || track.artist.localizedCaseInsensitiveContains(query)
-                    || track.album.localizedCaseInsensitiveContains(query)
-                    || track.genre.localizedCaseInsensitiveContains(query)
-                    || track.fileURL.lastPathComponent.localizedCaseInsensitiveContains(query)
-            }
+            scope = TrackTextSearch.filter(base, query: query, includeFileName: true)
         }
 
         let whitespace = CharacterSet.whitespacesAndNewlines
@@ -1129,18 +1123,6 @@ struct TracksAndTagsView: View {
 
         collect(node)
         return paths
-    }
-
-    private func filteredTracks(from tracks: [Track]) -> [Track] {
-        let query = searchText.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !query.isEmpty else { return tracks }
-        return tracks.filter { track in
-            track.title.localizedCaseInsensitiveContains(query)
-                || track.artist.localizedCaseInsensitiveContains(query)
-                || track.album.localizedCaseInsensitiveContains(query)
-                || track.genre.localizedCaseInsensitiveContains(query)
-                || track.fileURL.lastPathComponent.localizedCaseInsensitiveContains(query)
-        }
     }
 
     private func filterTree(_ nodes: [CrateNode]) -> [CrateNode] {

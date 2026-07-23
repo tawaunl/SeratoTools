@@ -88,11 +88,12 @@ private func apicFrameBytes() -> [UInt8] {
 // MARK: - Serato cue-point (GEOB) preservation
 
 private func geobBody(name: String, payload: [UInt8]) -> [UInt8] {
-    [0x00] // ISO-8859-1 encoding
-        + Array("application/octet-stream".utf8) + [0x00] // MIME
-        + [0x00] // empty filename
-        + Array(name.utf8) + [0x00] // content description (e.g. "Serato Markers2")
-        + payload
+    var body: [UInt8] = [0x00] // ISO-8859-1 encoding
+    body += Array("application/octet-stream".utf8) + [0x00] // MIME
+    body += [0x00] // empty filename
+    body += Array(name.utf8) + [0x00] // content description (e.g. "Serato Markers2")
+    body += payload
+    return body
 }
 
 @Test func preservesSeratoGeobCueFrame() {

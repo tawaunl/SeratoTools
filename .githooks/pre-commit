@@ -1,0 +1,21 @@
+#!/usr/bin/env bash
+# EZLibrary pre-commit hook: block commits that contain secrets.
+#
+# Enable it once per clone with:
+#   git config core.hooksPath .githooks
+set -euo pipefail
+
+if ! command -v gitleaks >/dev/null 2>&1; then
+  echo "warning: gitleaks not installed — skipping local secret scan."
+  echo "         install it with 'brew install gitleaks' for pre-commit protection."
+  echo "         (CI and GitHub push protection still scan your changes.)"
+  exit 0
+fi
+
+if ! gitleaks protect --staged --redact --no-banner; then
+  echo
+  echo "error: gitleaks detected a potential secret in your staged changes."
+  echo "       remove it, or if it is a false positive, add an allowlist entry"
+  echo "       in .gitleaks.toml, then commit again."
+  exit 1
+fi

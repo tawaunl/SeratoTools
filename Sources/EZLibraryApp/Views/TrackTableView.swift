@@ -249,14 +249,7 @@ struct TrackTableView: View {
             }
         }
 
-        let query = searchText.trimmingCharacters(in: .whitespacesAndNewlines)
-        let queryLower = query.lowercased()
-        let filtered = queryLower.isEmpty ? sourceTracks : sourceTracks.filter { track in
-            track.title.lowercased().contains(queryLower)
-                || track.artist.lowercased().contains(queryLower)
-                || track.genre.lowercased().contains(queryLower)
-                || track.album.lowercased().contains(queryLower)
-        }
+        let filtered = TrackTextSearch.filter(sourceTracks, query: searchText)
 
         // Descending swaps the operands rather than negating the ascending
         // result: `!ordered` returned `true` for equal elements on both

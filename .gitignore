@@ -6,3 +6,19 @@ dist/
 *.xcodeproj
 *.xcuserstate
 .vscode/
+
+# Secrets / credentials — never commit these
+.env
+.env.*
+!.env.example
+*.pem
+*.p12
+*.pfx
+*.key
+*.keystore
+*.jks
+id_rsa
+id_ed25519
+*.mobileprovision
+secrets.*
+credentials.json

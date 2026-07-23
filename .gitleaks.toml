@@ -1,0 +1,17 @@
+# Gitleaks configuration for EZLibrary.
+# Extends the built-in gitleaks ruleset with project-specific allowlists so
+# non-secret references (like environment-variable names) don't trip the scan.
+
+[extend]
+useDefault = true
+
+[allowlist]
+description = "EZLibrary allowlist"
+paths = [
+  '''(^|/)\.gitleaks\.toml$''',
+]
+regexes = [
+  # These are environment-variable NAMES referenced in code/docs, not secrets.
+  '''EZLIBRARY_(DISCOGS_TOKEN|ACOUSTID_KEY|[A-Z_]+)''',
+  '''SERATOTOOLS_[A-Z_]+''',
+]
